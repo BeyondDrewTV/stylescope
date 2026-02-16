@@ -1,0 +1,4 @@
+Title,Author,Series,Genre,Subgenre,readability,grammar,polish,prose,pacing,overall_score,confidence,review_count,flags,key_phrases,scoring_status
+Hate,Tate James,Madison Kate #1,Dark Romance,Reverse Harem,,,,,,,0,30,scoring_error: 404 Client Error: Not Found for url: https://openrouter.ai/api/v1/chat/completions,,error
+Hideaway,Penelope Douglas,Devil's Night #2,Dark Romance,New Adult,,,,,,,0,0,scoring_error: 404 Client Error: Not Found for url: https://openrouter.ai/api/v1/chat/completions,,error
+Haunting Adeline,H.D. Carlton,Cat and Mouse Duet #1,Dark Romance,Stalker Romance,,,,,,,0,0,scoring_error: 404 Client Error: Not Found for url: https://openrouter.ai/api/v1/chat/completions,,error
