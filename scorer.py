@@ -6,6 +6,7 @@ import json
 import time
 import logging
 import re
+import random
 import requests
 from config import GEMINI_RETRY_MAX, GEMINI_RETRY_DELAY
 from scrapers.utils import format_review_block
@@ -147,18 +148,66 @@ def _calculate_overall(scores: dict) -> int:
     return overall
 
 
+def _classify_error(error_msg: str) -> str:
+    """Return specific error type for better debugging."""
+    error_lower = error_msg.lower()
+    if "500" in error_msg or "internal server error" in error_lower:
+        return "api_error_500"
+    elif "429" in error_msg or "rate limit" in error_lower:
+        return "api_error_rate_limit"
+    elif "json" in error_lower or "parse" in error_lower:
+        return "json_parse_failure"
+    elif "not found" in error_lower or "404" in error_msg:
+        return "book_not_found"
+    elif "no excerpts" in error_lower:
+        return "no_excerpts_found"
+    else:
+        return f"scoring_error: {error_msg}"
+
+
 def _parse_llm_response(text: str) -> dict | None:
-    """Extract and parse JSON from LLM response."""
-    text = re.sub(r"```(?:json)?", "", text).strip()
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        return None
+    """Extract and parse JSON with multiple fallback strategies."""
     
+    # Strategy 1: Try parsing raw response
     try:
-        return json.loads(match.group())
-    except json.JSONDecodeError as e:
-        logger.warning(f"JSON parse error: {e}")
-        return None
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    
+    # Strategy 2: Strip markdown code fences
+    cleaned = re.sub(r"```(?:json)?", "", text).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+    
+    # Strategy 3: Extract JSON object between first { and last }
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON parse error after all attempts: {e}")
+    
+    # Strategy 4: Return fallback default score
+    logger.warning("All JSON parsing strategies failed - returning low-confidence default")
+    return {
+        "book_title": "",
+        "author": "",
+        "scores": {
+            "readability": 50,
+            "grammar": 50,
+            "polish": 50,
+            "prose": 50,
+            "pacing": 50
+        },
+        "overall_score": 50,
+        "confidence": 0,
+        "reasoning": {},
+        "flags": ["json_parse_failure"],
+        "review_count": 0,
+        "key_phrases": []
+    }
 
 
 def score_book(
@@ -202,7 +251,7 @@ def score_book(
                     "X-Title": "StyleScope",
                 },
                 data=json.dumps({
-                    "model": "google/gemma-3-12b-it:free",
+                    "model": "meta-llama/llama-3.3-70b-instruct:free",
                     "messages": [
                         {"role": "user", "content": prompt}
                     ],
@@ -246,7 +295,9 @@ def score_book(
             last_error = str(e)
             logger.warning(f"Attempt {attempt} failed for '{title}': {e}")
             if attempt < GEMINI_RETRY_MAX:
-                time.sleep(GEMINI_RETRY_DELAY * attempt)
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                logger.info(f"  Retry {attempt + 1}/{GEMINI_RETRY_MAX} in {wait_time:.1f}s...")
+                time.sleep(wait_time)
 
 
     logger.error(f"All retries failed for '{title}': {last_error}")
@@ -257,7 +308,7 @@ def score_book(
         "overall_score": None,
         "confidence": 0,
         "reasoning": {},
-        "flags": [f"scoring_error: {last_error}"],
+        "flags": [_classify_error(last_error)],
         "review_count": review_count,
         "key_phrases": [],
         "scoring_status": "error",

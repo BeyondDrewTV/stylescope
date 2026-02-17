@@ -130,8 +130,9 @@ def main():
 
     output_rows = []
     total       = len(df)
-    # Rate limiting: Gemini free tier is 15 RPM → ~4s min between calls
-    min_gap_sec = max(4, 60 // GEMINI_RPM_LIMIT)
+    
+    # Rate limiting: 15 seconds between requests = 6 requests/min (well under 20/min limit)
+    min_gap_sec = 15
 
     for i, (_, row) in enumerate(df.iterrows()):
         title   = row["Title"].strip()
@@ -142,33 +143,50 @@ def main():
 
         logger.info(f"\n[{i+1}/{total}] Scoring: '{title}' by {author}")
 
-        # 1. Aggregate reviews
-        excerpts = aggregate_excerpts(
-            title, author, series,
-            use_reddit=not args.no_reddit,
-            use_goodreads=not args.no_goodreads,
-        )
-
-        if not excerpts:
-            logger.warning(f"  No excerpts found — scoring with zero-signal prompt")
-
-        # 2. Score via LLM
-        from scorer import score_book
-        result = score_book(title, author, series, genre, subgenre, excerpts)
-
-        # 3. Log summary
-        if result.get("scoring_status") == "ok":
-            s = result["scores"]
-            logger.info(
-                f"  ✓ Overall: {result['overall_score']} | "
-                f"R:{s.get('readability')} G:{s.get('grammar')} P:{s.get('polish')} "
-                f"Pr:{s.get('prose')} Pa:{s.get('pacing')} | "
-                f"Confidence: {result.get('confidence')}%"
+        try:
+            # 1. Aggregate reviews
+            excerpts = aggregate_excerpts(
+                title, author, series,
+                use_reddit=not args.no_reddit,
+                use_goodreads=not args.no_goodreads,
             )
-        else:
-            logger.error(f"  ✗ Scoring failed: {result.get('flags')}")
 
-        output_rows.append(result_to_row(row, result))
+            if not excerpts:
+                logger.warning(f"  No excerpts found — scoring with zero-signal prompt")
+
+            # 2. Score via LLM
+            from scorer import score_book
+            result = score_book(title, author, series, genre, subgenre, excerpts)
+
+            # 3. Log summary
+            if result.get("scoring_status") == "ok":
+                s = result["scores"]
+                logger.info(
+                    f"  ✓ Overall: {result['overall_score']} | "
+                    f"R:{s.get('readability')} G:{s.get('grammar')} P:{s.get('polish')} "
+                    f"Pr:{s.get('prose')} Pa:{s.get('pacing')} | "
+                    f"Confidence: {result.get('confidence')}%"
+                )
+            else:
+                logger.error(f"  ✗ Scoring failed: {result.get('flags')}")
+
+            output_rows.append(result_to_row(row, result))
+
+        except Exception as e:
+            logger.error(f"  ✗ Unexpected error processing '{title}': {e}")
+            # Create error result so CSV has a row
+            error_result = {
+                "book_title": title,
+                "author": author,
+                "scores": {},
+                "overall_score": None,
+                "confidence": 0,
+                "flags": [f"processing_error: {str(e)}"],
+                "review_count": 0,
+                "key_phrases": [],
+                "scoring_status": "error",
+            }
+            output_rows.append(result_to_row(row, error_result))
 
         # 4. Rate limiting
         if i < total - 1:

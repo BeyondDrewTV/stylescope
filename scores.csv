@@ -1,3 +1,3 @@
 Title,Author,Series,Genre,Subgenre,readability,grammar,polish,prose,pacing,overall_score,confidence,review_count,flags,key_phrases,scoring_status
-The Minimalist,John Doe,,Fiction,Contemporary,65,75,60,55,70,65,45,0,No Reviews Available | Low Confidence | low_confidence: fewer than 5 review excerpts,Fiction | Contemporary | No reviews found,ok
-Dark Tower,Stephen King,Dark Tower,Fantasy,Dark Fantasy,78,72,70,68,75,74,82,22,Shift in writing style between volumes | Potential pacing issues with side quests,fast-paced | vivid | accessible writing | shifting style | dreamy and surreal,ok
+The Minimalist,John Doe,,Fiction,Contemporary,,,,,,,0,0,api_error_500,,error
+Dark Tower,Stephen King,Dark Tower,Fantasy,Dark Fantasy,,,,,,,0,22,api_error_500,,error
