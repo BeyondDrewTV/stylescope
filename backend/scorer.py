@@ -8,8 +8,8 @@ import logging
 import re
 import random
 import requests
-from config import GEMINI_RETRY_MAX, GEMINI_RETRY_DELAY
-from scrapers.utils import format_review_block
+from backend.config import GEMINI_RETRY_MAX, GEMINI_RETRY_DELAY
+from backend.scrapers.utils import format_review_block
 
 
 logger = logging.getLogger(__name__)

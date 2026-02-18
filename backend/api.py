@@ -45,9 +45,9 @@ from flask_mail import Mail, Message
 # ---------------------------------------------------------------------------
 # Import existing scoring system — DO NOT modify scorer.py
 # ---------------------------------------------------------------------------
-import scorer
-from scrapers import goodreads
-from quizzes import (
+from backend import scorer
+from backend.scrapers import goodreads
+from backend.quizzes import (
     TRIVIA_BANK,
     PERSONALITY_QUESTIONS,
     score_personality,
@@ -76,7 +76,7 @@ STRIPE_SUBSCRIPTION_PRICE_ID = os.getenv("STRIPE_SUBSCRIPTION_PRICE_ID")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 DB_PATH = os.getenv("DB_PATH", "stylescope.db")
-CSV_PATH = os.getenv("CSV_PATH", "scores_SUCCESS.csv")
+CSV_PATH = os.getenv("CSV_PATH", "data/scores_SUCCESS.csv")
 
 
 # ---------------------------------------------------------------------------

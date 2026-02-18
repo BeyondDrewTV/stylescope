@@ -14,7 +14,7 @@ import time
 import json
 import pandas as pd
 from pathlib import Path
-from config import MIN_EXCERPTS_HIGH_CONFIDENCE, MIN_EXCERPTS_MED_CONFIDENCE, OUTPUT_COLUMNS, GEMINI_RPM_LIMIT
+from backend.config import MIN_EXCERPTS_HIGH_CONFIDENCE, MIN_EXCERPTS_MED_CONFIDENCE, OUTPUT_COLUMNS, GEMINI_RPM_LIMIT
 
 # ─── Logging setup ────────────────────────────────────────────────────────────
 logging.basicConfig(
