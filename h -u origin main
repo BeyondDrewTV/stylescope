@@ -1,0 +1,59 @@
+[33mcommit 815b109fdf0c6b94c1d74694e4d0511aa0299e07[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: BeyondDrewTV <drewyomantas@gmail.com>
+Date:   Tue Feb 17 20:55:54 2026 -0600
+
+    Major reorganization: Clean project structure
+    
+    - Organized backend files into backend/ folder
+    - Organized frontend files into frontend/ folder
+    - Moved data files to data/ with input/output subfolders
+    - Fixed all import paths for new structure
+    - Updated .gitignore for Python and Node
+    - Removed duplicate CSV files and debug files
+    - Removed __pycache__ directories
+    - Created proper package structure with __init__.py files
+    
+    Project is now clean, organized, and fully functional.
+
+ .gitignore                                         |  46 [32m++++[m[31m-[m
+ README-INTEGRATION.md                              | 194 [31m-------------------[m
+ __pycache__/config.cpython-313.pyc                 | Bin [31m2833[m -> [32m0[m bytes
+ __pycache__/scorer.cpython-313.pyc                 | Bin [31m10589[m -> [32m0[m bytes
+ backend/__init__.py                                |   0
+ api.py => backend/api.py                           |   8 [32m+[m[31m-[m
+ config.py => backend/config.py                     |   0
+ main.py => backend/main.py                         |   2 [32m+[m[31m-[m
+ quizzes.py => backend/quizzes.py                   |   0
+ scorer.py => backend/scorer.py                     |   4 [32m+[m[31m-[m
+ backend/scrapers/__init__.py                       |   0
+ {scrapers => backend/scrapers}/goodreads.py        |   0
+ {scrapers => backend/scrapers}/reddit.py           |   0
+ {scrapers => backend/scrapers}/utils.py            |   2 [32m+[m[31m-[m
+ scores_SUCCESS.csv => data/input/books.csv         |   0
+ {output => data/output}/scored_books.csv           |   0
+ scores_final.csv => data/scores_SUCCESS.csv        |   0
+ eslint.config.js => frontend/eslint.config.js      |   0
+ index.html => frontend/index.html                  |   0
+ package-lock.json => frontend/package-lock.json    |   0
+ package.json => frontend/package.json              |   0
+ {src => frontend/src}/App.css                      |   0
+ {src => frontend/src}/App.jsx                      |   0
+ {src => frontend/src}/assets/react.svg             |   0
+ Pepper.jsx => frontend/src/components/Pepper.jsx   |   0
+ .../src/components/PointsDisplay.jsx               |   0
+ .../src/components/QuizModal.jsx                   |   0
+ {src => frontend/src}/index.css                    |   0
+ {src => frontend/src}/main.jsx                     |   0
+ .../src/stylescope-v8.jsx                          |   0
+ vite.config.js => frontend/vite.config.js          |   0
+ goodreads_page.html                                |  23 [31m---[m
+ input/books.csv                                    |   6 [31m-[m
+ public/vite.svg                                    |   1 [31m-[m
+ react-integration.jsx                              | 206 [31m---------------------[m
+ scores.csv                                         |   3 [31m-[m
+ scores_apify.csv                                   |   4 [31m-[m
+ scores_llama.csv                                   |  11 [31m--[m
+ stylescope.db                                      | Bin [31m36864[m -> [32m45056[m bytes
+ test_books.csv                                     |  51 [31m-----[m
+ test_apify.py => tests/test_apify.py               |   0
+ 41 files changed, 47 insertions(+), 514 deletions(-)
