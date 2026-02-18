@@ -10,6 +10,9 @@ All routes:
     GET  /api/books
     GET  /api/books/<id>
     GET  /api/books/search?q=
+    GET  /api/books/<id>/series
+    POST /api/series/<name>/notify
+    GET  /api/spice-levels
     POST /api/score-on-demand
     GET  /api/job-status/<id>
     POST /api/auth/magic-link
@@ -31,6 +34,7 @@ import csv
 import json
 import os
 import random
+import re
 import sqlite3
 import threading
 import time
@@ -155,6 +159,7 @@ def init_db():
         ("seriesNumber",     "INTEGER"),
         ("seriesTotal",      "INTEGER"),
         ("seriesIsComplete", "INTEGER DEFAULT 0"),
+        ("search_normalized", "TEXT"),
     ]:
         try:
             c.execute(f"ALTER TABLE books ADD COLUMN {col} {definition}")
@@ -216,6 +221,18 @@ def init_db():
             action TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+
+    # ========== SERIES TRACKING ==========
+    # -- Series notifications ------------------------------------------------
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS series_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
+            seriesName TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(email, seriesName)
         )
     """)
 
@@ -297,6 +314,20 @@ def migrate_csv_to_db():
     print(f"[migration] Done — {migrated} books imported. ({skipped} skipped)")
 
 
+# ========== FUZZY SEARCH ==========
+def normalize_search(s: str) -> str:
+    """
+    Normalize search query for fuzzy matching.
+    - Lowercase
+    - Strip punctuation
+    - Collapse multiple spaces
+    """
+    s = s.lower().strip()
+    s = re.sub(r'[.,\'"":;()\-]', '', s)  # Remove punctuation
+    s = re.sub(r'\s+', ' ', s)  # Collapse spaces
+    return s
+
+
 # ---------------------------------------------------------------------------
 # Book helpers
 # ---------------------------------------------------------------------------
@@ -324,7 +355,8 @@ def get_books():
     author = request.args.get("author")
     min_quality = request.args.get("minQuality", type=int)
     series = request.args.get("series")
-    limit = request.args.get("limit", default=200, type=int)
+    # ========== INCREASE BOOK LIMIT ==========
+    limit = request.args.get("limit", default=500, type=int)  # Larger default limit; frontend handles pagination
     offset = request.args.get("offset", default=0, type=int)
 
     conn = get_conn()
@@ -355,21 +387,41 @@ def get_books():
     return jsonify(books)
 
 
+# ========== FUZZY SEARCH ==========
 @app.route("/api/books/search", methods=["GET"])
 def search_books():
+    """
+    Search books using fuzzy matching on search_normalized column.
+    Falls back to LIKE search on title/author/series if no results.
+    """
     q = request.args.get("q", "").strip()
     if not q:
         return jsonify([])
 
     conn = get_conn()
     c = conn.cursor()
+    
+    # Try fuzzy search first using search_normalized column
+    normalized_query = normalize_search(q)
     c.execute("""
         SELECT * FROM books
-        WHERE title LIKE ? OR author LIKE ? OR seriesName LIKE ?
+        WHERE search_normalized LIKE ?
         ORDER BY qualityScore DESC
-        LIMIT 20
-    """, (f"%{q}%", f"%{q}%", f"%{q}%"))
+        LIMIT 50
+    """, (f"%{normalized_query}%",))
+    
     books = [_deserialize_book(dict(row)) for row in c.fetchall()]
+    
+    # Fallback to regular search if no fuzzy results
+    if not books:
+        c.execute("""
+            SELECT * FROM books
+            WHERE title LIKE ? OR author LIKE ? OR seriesName LIKE ?
+            ORDER BY qualityScore DESC
+            LIMIT 50
+        """, (f"%{q}%", f"%{q}%", f"%{q}%"))
+        books = [_deserialize_book(dict(row)) for row in c.fetchall()]
+    
     conn.close()
     return jsonify(books)
 
@@ -385,6 +437,137 @@ def get_book(book_id):
     if row:
         return jsonify(_deserialize_book(dict(row)))
     return jsonify({"error": "Book not found"}), 404
+
+
+# ========== SERIES TRACKING ==========
+@app.route("/api/books/<int:book_id>/series", methods=["GET"])
+def get_series_info(book_id):
+    """
+    Get complete series information and all books in the same series.
+    Returns series metadata + list of all books, sorted by seriesNumber.
+    """
+    conn = get_conn()
+    c = conn.cursor()
+    
+    # Get the book to find its series
+    c.execute("SELECT * FROM books WHERE id = ?", (book_id,))
+    book = c.fetchone()
+    
+    if not book or not book["seriesName"]:
+        conn.close()
+        return jsonify({"error": "Book not found or not part of a series"}), 404
+    
+    series_name = book["seriesName"]
+    
+    # Get all books in the same series
+    c.execute("""
+        SELECT * FROM books
+        WHERE seriesName = ?
+        ORDER BY seriesNumber ASC, title ASC
+    """, (series_name,))
+    
+    series_books = [_deserialize_book(dict(row)) for row in c.fetchall()]
+    conn.close()
+    
+    # Calculate series metadata
+    series_total = book["seriesTotal"]
+    series_is_complete = book["seriesIsComplete"] == 1
+    
+    return jsonify({
+        "seriesName": series_name,
+        "seriesTotal": series_total,
+        "seriesIsComplete": series_is_complete,
+        "nextExpectedDate": None,  # Not tracked yet - placeholder for future
+        "books": series_books,
+    })
+
+
+@app.route("/api/series/<series_name>/notify", methods=["POST"])
+def subscribe_series_updates(series_name):
+    """
+    Subscribe an email address to notifications for series updates.
+    Creates entry in series_notifications table.
+    """
+    data = request.get_json(force=True)
+    email = (data.get("email") or "").strip().lower()
+    
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+    
+    # Basic email validation
+    if "@" not in email or "." not in email:
+        return jsonify({"error": "Invalid email address"}), 400
+    
+    conn = get_conn()
+    c = conn.cursor()
+    
+    try:
+        c.execute("""
+            INSERT INTO series_notifications (email, seriesName)
+            VALUES (?, ?)
+        """, (email, series_name))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "message": f"You'll be notified when new books in {series_name} are added!"
+        })
+    except Exception as e:
+        conn.close()
+        # Likely a duplicate entry (UNIQUE constraint)
+        if "UNIQUE" in str(e):
+            return jsonify({
+                "message": f"You're already subscribed to {series_name} updates!"
+            })
+        return jsonify({"error": str(e)}), 500
+
+
+# ========== SPICE LEVEL EXPLANATIONS ==========
+@app.route("/api/spice-levels", methods=["GET"])
+def get_spice_levels():
+    """
+    Return spice level definitions for tooltips and glossary.
+    Used by frontend SpiceBadge component.
+    """
+    return jsonify({
+        "levels": [
+            {
+                "level": 0,
+                "label": "Sweet/Clean",
+                "description": "Closed-door romance. Kissing only or fade-to-black."
+            },
+            {
+                "level": 1,
+                "label": "Warm",
+                "description": "Mild heat. Some sensuality, mostly off-page."
+            },
+            {
+                "level": 2,
+                "label": "Mild Heat",
+                "description": "Moderate spice. Some on-page intimacy, not explicit."
+            },
+            {
+                "level": 3,
+                "label": "Hot",
+                "description": "Spicy. Multiple explicit scenes, central to plot."
+            },
+            {
+                "level": 4,
+                "label": "Steamy",
+                "description": "Very spicy. Frequent explicit content."
+            },
+            {
+                "level": 5,
+                "label": "Scorching",
+                "description": "Extremely explicit. Graphic detail, high frequency."
+            },
+            {
+                "level": 6,
+                "label": "Nuclear",
+                "description": "Maximum spice. Erotica-level content, potentially taboo themes."
+            }
+        ]
+    })
 
 
 # ---------------------------------------------------------------------------
