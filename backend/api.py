@@ -314,6 +314,83 @@ def migrate_csv_to_db():
     print(f"[migration] Done — {migrated} books imported. ({skipped} skipped)")
 
 
+def populate_spice_metadata():
+    """
+    Run once to backfill spice metadata columns.
+    Adds spice_label, spice_subtitle, spice_description to all books with spice_level.
+    
+    Usage: python -c "from api import populate_spice_metadata; populate_spice_metadata()"
+    """
+    SPICE_DEFS = {
+        0: {
+            'label': 'CLEAN',
+            'subtitle': 'No sexual content',
+            'description': 'Kissing only, fade-to-black, or no romance scenes'
+        },
+        1: {
+            'label': 'SWEET',
+            'subtitle': 'Closed door',
+            'description': 'Sensuality implied, nothing explicit shown'
+        },
+        2: {
+            'label': 'WARM',
+            'subtitle': 'Mild steam',
+            'description': 'Some explicit scenes, not overly detailed'
+        },
+        3: {
+            'label': 'STEAMY',
+            'subtitle': 'Moderate heat',
+            'description': 'Multiple explicit scenes with detail'
+        },
+        4: {
+            'label': 'HOT',
+            'subtitle': 'High heat',
+            'description': 'Frequent explicit scenes, graphic detail'
+        },
+        5: {
+            'label': 'VERY SPICY',
+            'subtitle': 'Explicit content',
+            'description': 'Extremely graphic, frequent scenes, kink elements'
+        },
+        6: {
+            'label': 'SCORCHING',
+            'subtitle': 'Erotica',
+            'description': 'Plot-focused erotica, taboo themes, extreme kink'
+        }
+    }
+    
+    conn = get_conn()
+    c = conn.cursor()
+    
+    # Add columns if they don't exist
+    for col in ['spice_label', 'spice_subtitle', 'spice_description']:
+        try:
+            c.execute(f"ALTER TABLE books ADD COLUMN {col} TEXT")
+            print(f"[spice-migration] Added column: {col}")
+        except Exception as e:
+            # Column already exists, that's fine
+            pass
+    
+    # Update all books that have a spice_level
+    c.execute("SELECT id, spice_level FROM books WHERE spice_level IS NOT NULL")
+    books = c.fetchall()
+    
+    updated = 0
+    for book_id, spice_level in books:
+        if spice_level in SPICE_DEFS:
+            data = SPICE_DEFS[spice_level]
+            c.execute("""
+                UPDATE books 
+                SET spice_label = ?, spice_subtitle = ?, spice_description = ?
+                WHERE id = ?
+            """, (data['label'], data['subtitle'], data['description'], book_id))
+            updated += 1
+    
+    conn.commit()
+    conn.close()
+    print(f"[spice-migration] ✅ Updated {updated} books with spice metadata")
+
+
 # ========== FUZZY SEARCH ==========
 def normalize_search(s: str) -> str:
     """
@@ -328,22 +405,66 @@ def normalize_search(s: str) -> str:
     return s
 
 
+def _fuzzy_score(needle, haystack):
+    """
+    Sliding-window partial match for typo tolerance.
+    Example: 'hd ccarlton' finds 'H.D. Carlton'
+    Returns a score from 0.0 to 1.0.
+    """
+    if not needle or not haystack:
+        return 0.0
+    
+    # Normalize both strings
+    needle = needle.lower().replace(" ", "").replace(".", "")
+    haystack = haystack.lower().replace(" ", "").replace(".", "")
+    
+    # Exact substring match = perfect score
+    if needle in haystack:
+        return 1.0
+    
+    # Sliding window matching for partial similarity
+    window_size = len(needle)
+    if window_size > len(haystack):
+        return 0.0
+    
+    best_score = 0.0
+    for i in range(len(haystack) - window_size + 1):
+        window = haystack[i:i + window_size]
+        matches = sum(a == b for a, b in zip(needle, window))
+        score = matches / window_size
+        best_score = max(best_score, score)
+    
+    return best_score
+
 # ---------------------------------------------------------------------------
 # Book helpers
 # ---------------------------------------------------------------------------
 
-def _deserialize_book(book: dict) -> dict:
-    for field in ("genres", "contentWarnings", "themes", "moods"):
-        val = book.get(field)
-        if isinstance(val, str):
-            try:
-                book[field] = json.loads(val)
-            except (json.JSONDecodeError, TypeError):
-                book[field] = []
-        elif val is None:
-            book[field] = []
-    return book
-
+def _deserialize_book(row):
+    """Safe deserialize with fallback for missing columns"""
+    def _get(idx, default=None):
+        try:
+            return row[idx] if idx < len(row) else default
+        except:
+            return default
+    
+    return {
+        "id": _get(0),
+        "title": _get(1),
+        "author": _get(2),
+        "series": _get(3),
+        "isbn": _get(4),
+        "qualityScore": _get(5),
+        "spiceLevel": _get(6),
+        "spiceLabel": _get(7),        # NEW
+        "spiceSubtitle": _get(8),     # NEW
+        "spiceDescription": _get(9),  # NEW
+        "technicalQuality": _get(10),
+        "proseStyle": _get(11),
+        "pacing": _get(12),
+        "readability": _get(13),
+        "craftExecution": _get(14)
+    }
 
 # ---------------------------------------------------------------------------
 # Book endpoints

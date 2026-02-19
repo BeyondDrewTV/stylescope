@@ -1,821 +1,1095 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// StyleScope v8 — Production UI
-// React + Vite · No emojis · Dark atmospheric · Spotify meets Goodreads
-// ─────────────────────────────────────────────────────────────────────────────
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:5000";
-
-// ─── Color & Label Constants ──────────────────────────────────────────────────
+// ─── Design Tokens ────────────────────────────────────────────────────────────
 const C = {
-  bgFrom:   "#120c1f",
-  bgTo:     "#2D1B4E",
-  pink:     "#FF6B9D",
-  orange:   "#FF8C42",
-  purple:   "#C77DFF",
-  q90: "#22c55e",
-  q80: "#60a5fa",
-  q70: "#f59e0b",
-  q60: "#f97316",
-  qLow:"#ef4444",
-  cardBg:     "linear-gradient(145deg, #ffffff 0%, #f8f2ff 100%)",
-  cardBorder: "rgba(199,125,255,0.15)",
-  shadow:     "0 8px 32px rgba(0,0,0,0.12), 0 1px 0 rgba(255,255,255,0.05)",
-  shadowHover:"0 12px 48px rgba(0,0,0,0.18), 0 1px 0 rgba(255,255,255,0.07)",
-  text:      "#1a0a2e",
-  textMid:   "#4a3568",
-  textMuted: "#8870a8",
-  spice: ["#94a3b8","#84cc16","#f59e0b","#f97316","#ef4444","#FF6B9D","#C77DFF"],
-  spiceLbl: ["Sweet","Warm","Mild Heat","Hot","Steamy","Scorching","Nuclear"],
+  purple:     '#C77DFF',
+  pink:       '#FF6B9D',
+  bg:         '#0a0118',
+  cardBg:     '#1a0a2e',
+  cardBgEnd:  '#2a1a3a',
+  danger:     '#ef4444',
+  text:       '#ffffff',
+  textMuted:  '#cccccc',
+  textSubtle: '#888888',
+  green:      '#4ade80',
+  yellow:     '#fbbf24',
+};
+const GRAD = 'linear-gradient(135deg, #C77DFF 0%, #FF6B9D 100%)';
+
+// ─── Spice Level Definitions ──────────────────────────────────────────────────
+const SPICE_LEVELS = {
+  0: { label: 'CLEAN',      subtitle: 'No sexual content', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)',  iconType: 'book',            description: 'Kissing only, fade-to-black, or no romance scenes' },
+  1: { label: 'SWEET',      subtitle: 'Closed door',       color: '#f472b6', bg: 'rgba(244,114,182,0.12)', iconType: 'heart',           description: 'Sensuality implied, nothing explicit shown' },
+  2: { label: 'WARM',       subtitle: 'Mild steam',        color: '#fb923c', bg: 'rgba(251,146,60,0.12)',  iconType: 'thermometer-low', description: 'Some explicit scenes, not overly detailed' },
+  3: { label: 'STEAMY',     subtitle: 'Moderate heat',     color: '#f97316', bg: 'rgba(249,115,22,0.12)',  iconType: 'thermometer-mid', description: 'Multiple explicit scenes with detail' },
+  4: { label: 'HOT',        subtitle: 'High heat',         color: '#ef4444', bg: 'rgba(239,68,68,0.12)',   iconType: 'thermometer-full',description: 'Frequent explicit scenes, graphic detail' },
+  5: { label: 'VERY SPICY', subtitle: 'Explicit content',  color: '#dc2626', bg: 'rgba(220,38,38,0.12)',   iconType: 'flame',           description: 'Extremely graphic, frequent scenes, kink elements' },
+  6: { label: 'SCORCHING',  subtitle: 'Erotica',           color: '#991b1b', bg: 'rgba(153,27,27,0.14)',   iconType: 'triple-flame',    description: 'Plot-focused erotica, taboo themes, extreme kink' },
 };
 
-// ─── Global CSS ───────────────────────────────────────────────────────────────
-const GLOBAL_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Nunito:wght@400;500;600;700;800&display=swap');
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth}
-body{
-  font-family:'Nunito',sans-serif;
-  background:linear-gradient(135deg,#120c1f 0%,#2D1B4E 100%);
-  background-attachment:fixed;
-  min-height:100vh;
-  -webkit-font-smoothing:antialiased;
-  color:#fff;
-}
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-track{background:rgba(255,255,255,0.04)}
-::-webkit-scrollbar-thumb{background:rgba(199,125,255,0.35);border-radius:3px}
-::-webkit-scrollbar-thumb:hover{background:rgba(199,125,255,0.55)}
-.no-sb::-webkit-scrollbar{display:none}
-.no-sb{scrollbar-width:none;-ms-overflow-style:none}
-button{cursor:pointer;border:none;background:none;font-family:inherit}
-input,select,textarea{font-family:inherit;outline:none}
-::selection{background:rgba(199,125,255,0.3);color:#fff}
-@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.45}}
-.fade-up{animation:fadeUp 0.35s ease both}
-.pulse{animation:pulse 1.5s ease-in-out infinite}
+// ─── Global Styles ─────────────────────────────────────────────────────────────
+const globalCSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Nunito:wght@400;500;600;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body, #root {
+    height: 100%; background: ${C.bg}; color: ${C.text};
+    font-family: 'Nunito', sans-serif; -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #3a2a5a; border-radius: 4px; }
+  * { -webkit-tap-highlight-color: transparent; }
+
+  @keyframes fadeIn   { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes pulse    { 0%,100% { opacity:1; } 50% { opacity:0.35; } }
+  @keyframes spin     { to { transform:rotate(360deg); } }
+  @keyframes slideUp  { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
+  @keyframes fadeSlide{ from { opacity:0; transform:translateX(12px); } to { opacity:1; transform:translateX(0); } }
+
+  .card-appear  { animation: fadeIn 0.3s ease both; }
+  .fade-slide   { animation: fadeSlide 0.25s ease both; }
+  .skeleton     { animation: pulse 1.6s ease-in-out infinite; background: #2a1a3e; border-radius: 8px; }
+  .modal-enter  { animation: slideUp 0.32s cubic-bezier(0.34,1.4,0.64,1) both; }
+
+  .books-grid {
+    display: grid; gap: 16px; grid-template-columns: 1fr;
+    padding: 16px 16px 100px;
+  }
+  @media(min-width:768px)  { .books-grid { grid-template-columns:repeat(2,1fr); padding:24px 24px 100px; } }
+  @media(min-width:1200px) { .books-grid { grid-template-columns:repeat(3,1fr); padding:32px 32px 100px; } }
+
+  .book-card {
+    background: linear-gradient(135deg,${C.cardBg} 0%,${C.cardBgEnd} 100%);
+    border-radius:16px; border:1px solid rgba(199,125,255,0.12);
+    cursor:pointer; transition:transform 0.15s ease, box-shadow 0.15s ease;
+    overflow:hidden; position:relative;
+  }
+  .book-card:active { transform:scale(0.97); box-shadow:0 2px 8px rgba(199,125,255,0.2); }
+  .book-card:not(:active) { box-shadow:0 4px 16px rgba(0,0,0,0.4); }
+
+  .h-card {
+    background:linear-gradient(135deg,${C.cardBg} 0%,${C.cardBgEnd} 100%);
+    border-radius:14px; border:1px solid rgba(199,125,255,0.1);
+    min-width:148px; max-width:148px; flex-shrink:0;
+    cursor:pointer; transition:transform 0.15s ease;
+    overflow:hidden;
+  }
+  .h-card:active { transform:scale(0.96); }
+
+  .bottom-nav {
+    position:fixed; bottom:0; left:0; right:0; height:64px;
+    background:rgba(10,1,24,0.96); backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    border-top:1px solid rgba(199,125,255,0.15);
+    display:flex; align-items:center; justify-content:space-around; z-index:100;
+  }
+  .nav-btn {
+    display:flex; flex-direction:column; align-items:center; gap:4px;
+    padding:8px 20px; min-width:44px; min-height:44px;
+    background:none; border:none; cursor:pointer; border-radius:12px;
+    position:relative; transition:background 0.15s ease;
+  }
+  .nav-btn:active { background:rgba(199,125,255,0.1); }
+
+  .search-input {
+    width:100%; padding:14px 48px 14px 16px;
+    background:${C.cardBg}; border:1px solid rgba(199,125,255,0.2);
+    border-radius:12px; color:${C.text};
+    font-family:'Nunito',sans-serif; font-size:15px;
+    outline:none; transition:border-color 0.2s ease;
+  }
+  .search-input:focus { border-color:${C.purple}; }
+  .search-input::placeholder { color:${C.textSubtle}; }
+
+  .modal-overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,0.78);
+    backdrop-filter:blur(4px); z-index:200;
+    display:flex; align-items:flex-end; justify-content:center;
+  }
+  @media(min-width:768px) { .modal-overlay { align-items:center; } }
+
+  .modal-sheet {
+    width:100%; max-width:600px; max-height:88vh;
+    background:${C.cardBg}; border-radius:20px 20px 0 0;
+    overflow-y:auto; padding:24px; position:relative;
+  }
+  @media(min-width:768px) {
+    .modal-sheet { border-radius:20px; max-height:80vh; margin:16px; }
+  }
+  .main-scroll {
+    overflow-y:auto; height:calc(100vh - 64px);
+    -webkit-overflow-scrolling:touch;
+  }
+  .horiz-scroll {
+    display:flex; overflow-x:auto; gap:12px;
+    padding-bottom:4px; scroll-snap-type:x mandatory;
+  }
+  .horiz-scroll::-webkit-scrollbar { height:3px; }
+  .horiz-scroll > * { scroll-snap-align:start; }
+
+  .btn-press { transition:transform 0.1s ease; }
+  .btn-press:active { transform:scale(0.95); }
+
+  .tag {
+    display:inline-flex; align-items:center; gap:4px;
+    padding:3px 9px; border-radius:20px;
+    font-size:11px; font-weight:600; font-family:'Nunito',sans-serif;
+  }
 `;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const qColor = s => s >= 90 ? C.q90 : s >= 80 ? C.q80 : s >= 70 ? C.q70 : s >= 60 ? C.q60 : C.qLow;
-const qLabel = s => s >= 90 ? "Exceptional" : s >= 80 ? "Strong" : s >= 70 ? "Solid" : s >= 60 ? "Uneven" : "Rough";
-const arr    = v => Array.isArray(v) ? v : [];
-const fmt    = n => n >= 1000 ? `${(n/1000).toFixed(1)}k` : String(n ?? "");
+// ─── SVG Icon Library ──────────────────────────────────────────────────────────
+const Icons = {
+  Home:    (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><polyline points="9 21 9 12 15 12 15 21"/></svg>,
+  Search:  (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+  Library: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
+  Profile: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+  X:       (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+  Chevron: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>,
+  Camera:  (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>,
+  Clock:   (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+  Star:    (p) => <svg {...p} viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
+  Shuffle: (p) => <svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>,
+};
 
-// ─── GlossyBookIcon ───────────────────────────────────────────────────────────
-function GlossyBookIcon({ size = 88 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 88 88" fill="none" aria-hidden="true">
-      <defs>
-        <linearGradient id="bookGrad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#C77DFF" stopOpacity="0.9"/>
-          <stop offset="100%" stopColor="#FF6B9D" stopOpacity="0.7"/>
-        </linearGradient>
-        <linearGradient id="spineGrad" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#120c1f" stopOpacity="0.25"/>
-          <stop offset="100%" stopColor="#120c1f" stopOpacity="0.05"/>
-        </linearGradient>
-        <filter id="bookShadow">
-          <feDropShadow dx="0" dy="3" stdDeviation="4" floodColor="#8b5cf6" floodOpacity="0.25"/>
-        </filter>
-      </defs>
-      <rect x="16" y="12" width="52" height="66" rx="5" fill="url(#bookGrad)" filter="url(#bookShadow)"/>
-      <rect x="16" y="12" width="10" height="66" rx="4" fill="url(#spineGrad)"/>
-      <rect x="28" y="28" width="28" height="3" rx="1.5" fill="rgba(255,255,255,0.55)"/>
-      <rect x="28" y="35" width="20" height="3" rx="1.5" fill="rgba(255,255,255,0.35)"/>
-      <rect x="28" y="42" width="24" height="3" rx="1.5" fill="rgba(255,255,255,0.25)"/>
-      <ellipse cx="32" cy="22" rx="8" ry="4" fill="rgba(255,255,255,0.18)" transform="rotate(-20 32 22)"/>
-    </svg>
-  );
-}
+// ─── Spice Icons ──────────────────────────────────────────────────────────────
+const SpiceIcon = ({ type, color, size = 18 }) => {
+  const s = { width: size, height: size, flexShrink: 0 };
+  const icons = {
+    book: (
+      <svg style={s} viewBox="0 0 24 24" fill="none">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z"
+          stroke={color} strokeWidth="2" strokeLinecap="round"/>
+      </svg>
+    ),
+    heart: (
+      <svg style={s} viewBox="0 0 24 24" fill="none">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+          stroke={color} strokeWidth="2"/>
+      </svg>
+    ),
+    'thermometer-low': (
+      <svg style={s} viewBox="0 0 24 24" fill="none">
+        <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" stroke={color} strokeWidth="2"/>
+        <rect x="10.25" y="13" width="3.5" height="3" fill={color} opacity="0.4"/>
+        <circle cx="11.5" cy="18.5" r="2" fill={color}/>
+      </svg>
+    ),
+    'thermometer-mid': (
+      <svg style={s} viewBox="0 0 24 24" fill="none">
+        <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" stroke={color} strokeWidth="2"/>
+        <rect x="10.25" y="8" width="3.5" height="8" fill={color} opacity="0.4"/>
+        <circle cx="11.5" cy="18.5" r="2" fill={color}/>
+      </svg>
+    ),
+    'thermometer-full': (
+      <svg style={s} viewBox="0 0 24 24" fill="none">
+        <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" stroke={color} strokeWidth="2"/>
+        <rect x="10.25" y="3.5" width="3.5" height="12.5" fill={color} opacity="0.45"/>
+        <circle cx="11.5" cy="18.5" r="2" fill={color}/>
+      </svg>
+    ),
+    flame: (
+      <svg style={s} viewBox="0 0 24 24" fill="none">
+        <path d="M12 2C8.5 7 9 10.5 9 12a3 3 0 0 0 6 0c0-1.5-.5-3-3-10z" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    ),
+    'triple-flame': (
+      <svg style={s} viewBox="0 0 24 24" fill="none">
+        <path d="M7 20a2.5 2.5 0 0 0 2.5-2.5c0-1.5-.8-3-2.5-6.5 1.7 3.5 2.5 5 2.5 6.5a2.5 2.5 0 0 0 5 0c0-2.5-1.5-5-5-11 3.5 6 5 8.5 5 11a2.5 2.5 0 0 0 5 0c0-1.5-.8-3-2.5-6.5" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    ),
+  };
+  return icons[type] || null;
+};
 
-// ─── QRing ────────────────────────────────────────────────────────────────────
-function QRing({ score, size = 56, strokeWidth = 5 }) {
-  const r    = (size - strokeWidth * 2) / 2;
-  const circ = 2 * Math.PI * r;
-  const off  = circ - (circ * Math.min(score ?? 0, 100)) / 100;
-  const col  = qColor(score ?? 0);
-  return (
-    <svg width={size} height={size} style={{ flexShrink: 0, display: "block" }}>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(0,0,0,0.07)" strokeWidth={strokeWidth}/>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={col} strokeWidth={strokeWidth}
-        strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={off}
-        transform={`rotate(-90 ${size/2} ${size/2})`}
-        style={{ transition: "stroke-dashoffset 0.6s ease" }}/>
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle"
-        fontSize={size < 50 ? "11" : "14"} fontWeight="800"
-        fontFamily="'Sora',sans-serif" fill={col}>
-        {score ?? "—"}
-      </text>
-    </svg>
-  );
-}
+// ─── Spice Level Badge ────────────────────────────────────────────────────────
+function SpiceLevelBadge({ level, variant = 'default', showDescription = false }) {
+  if (level === null || level === undefined) return null;
+  const sp = SPICE_LEVELS[level];
+  if (!sp) return null;
 
-// ─── SpiceBadge ───────────────────────────────────────────────────────────────
-function SpiceBadge({ level }) {
-  if (level == null) return null;
-  const indicators = { 0:"○", 1:"◐", 2:"●", 3:"●●", 4:"●●●", 5:"▲", 6:"✦" };
-  const lv  = Math.min(level, 6);
-  const col = C.spice[lv];
+  if (variant === 'compact') {
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        padding: '3px 8px', borderRadius: 6,
+        background: sp.bg, border: `1px solid ${sp.color}30`,
+        fontSize: 11, fontWeight: 700, color: sp.color,
+        fontFamily: "'Nunito', sans-serif", letterSpacing: '0.03em',
+      }}>
+        <SpiceIcon type={sp.iconType} color={sp.color} size={12}/>
+        {sp.label}
+      </span>
+    );
+  }
+
+  if (variant === 'detailed') {
+    return (
+      <div style={{
+        padding: 14, borderRadius: 12,
+        background: sp.bg, border: `1px solid ${sp.color}30`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: showDescription ? 8 : 0 }}>
+          <SpiceIcon type={sp.iconType} color={sp.color} size={28}/>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: sp.color, fontFamily: "'Sora',sans-serif", letterSpacing: '0.04em' }}>
+              {sp.label}
+            </div>
+            <div style={{ fontSize: 13, color: sp.color, opacity: 0.75, marginTop: 1 }}>
+              {sp.subtitle}
+            </div>
+          </div>
+        </div>
+        {showDescription && (
+          <p style={{ fontSize: 13, color: sp.color, opacity: 0.8, lineHeight: 1.5, marginTop: 4 }}>
+            {sp.description}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // default
   return (
     <span style={{
-      display:"inline-flex", alignItems:"center", gap:"5px",
-      background:`${col}30`, border:`1.5px solid ${col}60`,
-      padding:"5px 11px", borderRadius:"8px",
-      fontSize:"11px", fontFamily:"'Sora',sans-serif", fontWeight:700,
-      letterSpacing:"0.3px", color: lv === 0 ? "#666" : col,
+      display: 'inline-flex', alignItems: 'center', gap: 7,
+      padding: '5px 11px', borderRadius: 8,
+      background: sp.bg, border: `1px solid ${sp.color}25`,
+      fontSize: 13, fontWeight: 700, color: sp.color,
+      fontFamily: "'Nunito', sans-serif", letterSpacing: '0.04em',
     }}>
-      <span style={{ fontSize:"13px", lineHeight:1 }}>{indicators[lv]}</span>
-      {C.spiceLbl[lv].toUpperCase()}
+      <SpiceIcon type={sp.iconType} color={sp.color} size={16}/>
+      {sp.label}
     </span>
   );
 }
 
-// ─── WarningBadge ─────────────────────────────────────────────────────────────
-function WarningBadge() {
-  return (
-    <span style={{
-      display:"inline-flex", alignItems:"center", gap:"4px",
-      padding:"3px 9px", borderRadius:"6px",
-      fontSize:"11px", fontWeight:700, fontFamily:"'Sora',sans-serif", letterSpacing:"0.04em",
-      background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", color:"#ef4444",
-    }}>⚠ WARNING</span>
-  );
-}
+// ─── Score Helpers ────────────────────────────────────────────────────────────
+const scoreColor = (s) => s >= 80 ? C.green : s >= 60 ? C.yellow : C.danger;
 
-// ─── GenreChip ────────────────────────────────────────────────────────────────
-function GenreChip({ children, onClick }) {
+function QualityRing({ score, size = 72 }) {
+  const r    = (size - 10) / 2;
+  const circ = 2 * Math.PI * r;
+  const fill = (score / 100) * circ;
+  const col  = scoreColor(score);
   return (
-    <button onClick={onClick} style={{
-      display:"inline-block", padding:"4px 10px", borderRadius:"6px",
-      fontSize:"11px", fontWeight:600, background:"rgba(199,125,255,0.1)",
-      border:"1px solid rgba(199,125,255,0.2)", color:C.textMid,
-      cursor: onClick ? "pointer" : "default", whiteSpace:"nowrap", flexShrink:0,
-    }}>{children}</button>
-  );
-}
-
-// ─── DimBar ───────────────────────────────────────────────────────────────────
-function DimBar({ label, score, note }) {
-  const col = qColor(score ?? 0);
-  return (
-    <div style={{ marginBottom:"16px" }}>
-      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
-        <span style={{ fontSize:"13px", fontWeight:600, color:C.textMid }}>{label}</span>
-        <span style={{ fontSize:"13px", fontWeight:800, fontFamily:"'Sora',sans-serif", color:col }}>{score ?? "—"}</span>
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="5"/>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={col} strokeWidth="5"
+          strokeLinecap="round" strokeDasharray={`${fill} ${circ}`}
+          style={{ transition: 'stroke-dasharray 0.6s ease' }}/>
+      </svg>
+      <div style={{
+        position: 'absolute', inset: 0,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <span style={{ fontSize: size > 60 ? 17 : 12, fontWeight: 800, fontFamily: "'Sora',sans-serif", color: col, lineHeight: 1 }}>{score}</span>
+        <span style={{ fontSize: 9, color: C.textSubtle }}>/ 100</span>
       </div>
-      <div style={{ height:"5px", background:"rgba(0,0,0,0.08)", borderRadius:"3px", overflow:"hidden" }}>
-        <div style={{ height:"100%", borderRadius:"3px", width:`${score ?? 0}%`, background:`linear-gradient(90deg,${col}88,${col})`, transition:"width 0.7s ease" }}/>
-      </div>
-      {note && <p style={{ marginTop:"5px", fontSize:"12px", color:C.textMuted, lineHeight:1.5 }}>{note}</p>}
     </div>
   );
 }
 
-// ─── Pill ─────────────────────────────────────────────────────────────────────
-function Pill({ children, active, color, onClick, style = {} }) {
-  const c = color || C.purple;
+// ─── Unscored Badge ───────────────────────────────────────────────────────────
+function UnscoredBadge({ book, onRequest }) {
+  const [pressed, setPressed] = useState(false);
+  const pressProps = {
+    onTouchStart: () => setPressed(true), onTouchEnd: () => setPressed(false),
+    onMouseDown: () => setPressed(true), onMouseUp: () => setPressed(false),
+    onMouseLeave: () => setPressed(false),
+  };
   return (
-    <button onClick={onClick} style={{
-      display:"inline-flex", alignItems:"center",
-      padding:"6px 14px", borderRadius:"50px",
-      fontSize:"12px", fontWeight:700, fontFamily:"'Sora',sans-serif",
-      letterSpacing:"0.03em", whiteSpace:"nowrap",
-      border: active ? `1.5px solid ${c}` : "1.5px solid rgba(255,255,255,0.18)",
-      background: active ? `${c}22` : "rgba(255,255,255,0.07)",
-      color: active ? c : "rgba(255,255,255,0.7)",
-      boxShadow: active ? `0 2px 12px ${c}30` : "none",
-      transition:"all 0.18s ease",
-      ...style,
-    }}>{children}</button>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      <div style={{
+        width: 64, height: 64, borderRadius: '50%',
+        background: 'linear-gradient(135deg,#3a2a5a 0%,#2a1a4a 100%)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        border: '2px dashed #555', flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 22, color: '#888', fontFamily: "'Sora',sans-serif", fontWeight: 700 }}>?</span>
+      </div>
+      <span style={{ fontSize: 11, color: C.textSubtle }}>Score pending</span>
+      <button className="btn-press" {...pressProps}
+        onClick={(e) => { e.stopPropagation(); onRequest(book); }}
+        style={{
+          padding: '7px 14px', background: GRAD, color: '#fff',
+          border: 'none', borderRadius: 8, fontSize: 12, cursor: 'pointer',
+          fontFamily: "'Nunito',sans-serif", fontWeight: 700,
+          transform: pressed ? 'scale(0.95)' : 'scale(1)',
+          transition: 'transform 0.1s ease',
+          boxShadow: '0 4px 12px rgba(199,125,255,0.3)',
+          minHeight: 36,
+        }}
+      >
+        Request Score
+      </button>
+    </div>
   );
 }
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 function SkeletonCard() {
   return (
-    <div style={{ background:C.cardBg, borderRadius:"18px", padding:"20px", border:`1px solid ${C.cardBorder}`, boxShadow:C.shadow }}>
-      <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:"12px" }}>
-        <div className="pulse" style={{ width:42, height:42, borderRadius:"50%", background:"rgba(0,0,0,0.08)" }}/>
+    <div style={{
+      background: `linear-gradient(135deg,${C.cardBg} 0%,${C.cardBgEnd} 100%)`,
+      borderRadius: 16, border: '1px solid rgba(199,125,255,0.07)',
+      padding: 16, display: 'flex', gap: 16,
+    }}>
+      <div className="skeleton" style={{ width: 72, height: 72, borderRadius: '50%', flexShrink: 0 }}/>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="skeleton" style={{ height: 15, width: '80%' }}/>
+        <div className="skeleton" style={{ height: 12, width: '50%' }}/>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <div className="skeleton" style={{ height: 22, width: 72, borderRadius: 20 }}/>
+          <div className="skeleton" style={{ height: 22, width: 52, borderRadius: 20 }}/>
+        </div>
       </div>
-      <div className="pulse" style={{ width:64, height:64, borderRadius:"10px", background:"rgba(0,0,0,0.08)", margin:"0 auto 14px" }}/>
-      {[85,60,40,70].map((w,i) => (
-        <div key={i} className="pulse" style={{ height: i===0?"16px":"11px", width:`${w}%`, background:"rgba(0,0,0,0.07)", borderRadius:"4px", marginBottom:"8px" }}/>
-      ))}
     </div>
   );
 }
 
-// ─── BookCard ─────────────────────────────────────────────────────────────────
-function BookCard({ book, onClick, onAuthorClick, onGenreClick }) {
-  const [hovered, setHovered] = useState(false);
-  const genres   = arr(book.genres);
-  const warnings = arr(book.contentWarnings);
+function SkeletonHCard() {
+  return (
+    <div style={{
+      minWidth: 148, maxWidth: 148, flexShrink: 0,
+      background: `linear-gradient(135deg,${C.cardBg} 0%,${C.cardBgEnd} 100%)`,
+      borderRadius: 14, overflow: 'hidden',
+    }}>
+      <div className="skeleton" style={{ width: '100%', height: 112 }}/>
+      <div style={{ padding: '10px 10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div className="skeleton" style={{ height: 12, width: '90%' }}/>
+        <div className="skeleton" style={{ height: 11, width: '65%' }}/>
+        <div className="skeleton" style={{ height: 20, width: 70, borderRadius: 20 }}/>
+      </div>
+    </div>
+  );
+}
+
+// ─── Horizontal Book Card ─────────────────────────────────────────────────────
+function HorizontalBookCard({ book, onSelect }) {
+  return (
+    <div className="h-card" onClick={() => onSelect(book)}>
+      {/* Cover area */}
+      <div style={{
+        width: '100%', height: 112,
+        background: 'linear-gradient(135deg,#2a1a4a 0%,#3a1a5a 100%)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        position: 'relative',
+      }}>
+        {book.qualityScore > 0 ? (
+          <QualityRing score={book.qualityScore} size={60}/>
+        ) : (
+          <div style={{
+            width: 48, height: 48, borderRadius: '50%',
+            background: 'rgba(0,0,0,0.3)',
+            border: '2px dashed #555',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <span style={{ fontSize: 18, color: '#666', fontWeight: 700 }}>?</span>
+          </div>
+        )}
+      </div>
+      {/* Info */}
+      <div style={{ padding: '10px 10px 12px' }}>
+        <p style={{
+          fontSize: 12, fontWeight: 700, color: C.text,
+          lineHeight: 1.3, marginBottom: 3,
+          overflow: 'hidden', display: '-webkit-box',
+          WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+          fontFamily: "'Sora',sans-serif",
+        }}>{book.title}</p>
+        <p style={{
+          fontSize: 11, color: C.textSubtle, marginBottom: 6,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{book.author}</p>
+        {book.spiceLevel !== null && book.spiceLevel !== undefined && (
+          <SpiceLevelBadge level={book.spiceLevel} variant="compact"/>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Book Card (Grid) ─────────────────────────────────────────────────────────
+function BookCard({ book, onSelect, onRequest, index }) {
+  const scored = book.qualityScore > 0;
+  return (
+    <div className="book-card card-appear"
+      style={{ animationDelay: `${Math.min(index * 35, 350)}ms` }}
+      onClick={() => onSelect(book)}
+      role="button" tabIndex={0}
+      onKeyDown={(e) => e.key === 'Enter' && onSelect(book)}
+      aria-label={`${book.title} by ${book.author}`}
+    >
+      <div style={{ padding: 16, display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 72 }}>
+          {scored
+            ? <QualityRing score={book.qualityScore} size={72}/>
+            : <UnscoredBadge book={book} onRequest={onRequest}/>
+          }
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h3 style={{
+            fontFamily: "'Sora',sans-serif", fontSize: 15, fontWeight: 700,
+            color: C.text, lineHeight: 1.3, marginBottom: 4,
+            overflow: 'hidden', display: '-webkit-box',
+            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+          }}>{book.title}</h3>
+          <p style={{ fontSize: 13, color: C.textMuted, marginBottom: 8 }}>{book.author}</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+            {book.spiceLevel !== null && book.spiceLevel !== undefined && (
+              <SpiceLevelBadge level={book.spiceLevel} variant="compact"/>
+            )}
+            {book.series && (
+              <span className="tag" style={{ background: 'rgba(199,125,255,0.1)', color: C.purple }}>
+                Series
+              </span>
+            )}
+            {book.genre && (
+              <span className="tag" style={{ background: 'rgba(255,255,255,0.06)', color: C.textSubtle }}>
+                {book.genre}
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={{ alignSelf: 'center', color: C.textSubtle, flexShrink: 0 }}>
+          <Icons.Chevron width={16} height={16}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Section Row (Home Horizontal Scroll) ────────────────────────────────────
+function SectionRow({ title, icon: SectionIcon, iconColor, books, loading, onSelect }) {
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px', marginBottom: 12 }}>
+        <SectionIcon width={18} height={18} style={{ color: iconColor }}/>
+        <h2 style={{
+          fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 700, color: C.text,
+        }}>{title}</h2>
+      </div>
+      <div className="horiz-scroll" style={{ padding: '0 16px 4px' }}>
+        {loading
+          ? Array.from({ length: 5 }).map((_, i) => <SkeletonHCard key={i}/>)
+          : books.map((b) => <HorizontalBookCard key={b.id} book={b} onSelect={onSelect}/>)
+        }
+      </div>
+    </div>
+  );
+}
+
+// ─── Home Tab ─────────────────────────────────────────────────────────────────
+function HomeTab({ onSelect, onRequest, onGoSearch }) {
+  const [sections, setSections] = useState({ recentlyScored: [], highestRated: [], randomPicks: [] });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/books/home-sections');
+        const data = await res.json();
+        setSections(data);
+      } catch (err) {
+        console.error('Home sections error:', err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const hasContent = sections.recentlyScored.length > 0
+    || sections.highestRated.length > 0
+    || sections.randomPicks.length > 0;
 
   return (
-    <div
-      onClick={() => onClick?.(book)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        background:C.cardBg, borderRadius:"18px", padding:"20px",
-        border:`1px solid ${hovered ? "rgba(199,125,255,0.3)" : C.cardBorder}`,
-        boxShadow: hovered ? C.shadowHover : C.shadow,
-        cursor:"pointer", position:"relative",
-        display:"flex", flexDirection:"column", gap:"10px",
-        transform: hovered ? "translateY(-4px)" : "translateY(0)",
-        transition:"all 0.25s cubic-bezier(0.4,0,0.2,1)",
-      }}
-    >
-      {/* Top row: warning left, score right */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", minHeight:"56px" }}>
-        <div style={{ paddingTop:"2px" }}>
-          {warnings.length > 0 && <WarningBadge/>}
+    <div className="main-scroll">
+      {/* Sticky header */}
+      <div style={{
+        padding: '24px 16px 12px',
+        position: 'sticky', top: 0, zIndex: 10,
+        background: `linear-gradient(180deg,${C.bg} 60%,transparent 100%)`,
+        backdropFilter: 'blur(8px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <div>
+          <h1 style={{
+            fontFamily: "'Sora',sans-serif", fontSize: 26, fontWeight: 800,
+            background: GRAD, WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+            lineHeight: 1.1,
+          }}>StyleScope</h1>
+          <p style={{ fontSize: 12, color: C.textSubtle, marginTop: 2 }}>
+            AI-scored romance book discovery
+          </p>
         </div>
-        <QRing score={book.qualityScore} size={56} strokeWidth={5}/>
+        <button
+          onClick={onGoSearch}
+          style={{
+            width: 44, height: 44, borderRadius: 12,
+            background: 'rgba(199,125,255,0.1)',
+            border: '1px solid rgba(199,125,255,0.2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', color: C.purple, flexShrink: 0,
+          }}
+          aria-label="Go to search"
+        >
+          <Icons.Search width={20} height={20}/>
+        </button>
       </div>
 
-      {/* Book icon centered */}
-      <div style={{ display:"flex", justifyContent:"center" }}>
-        <GlossyBookIcon size={72}/>
-      </div>
+      {!loading && !hasContent ? (
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          justifyContent: 'center', gap: 12, padding: '60px 32px', textAlign: 'center',
+        }}>
+          <div style={{
+            width: 80, height: 80, borderRadius: '50%',
+            background: 'rgba(199,125,255,0.08)',
+            border: '2px solid rgba(199,125,255,0.2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icons.Library width={36} height={36} style={{ color: 'rgba(199,125,255,0.4)' }}/>
+          </div>
+          <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 20, fontWeight: 700 }}>
+            No scored books yet
+          </h2>
+          <p style={{ fontSize: 14, color: C.textSubtle, maxWidth: 260 }}>
+            Head to Search to find books and request AI quality scores.
+          </p>
+          <button
+            className="btn-press"
+            onClick={onGoSearch}
+            style={{
+              marginTop: 8, padding: '12px 28px', background: GRAD,
+              color: '#fff', border: 'none', borderRadius: 10,
+              fontSize: 15, fontWeight: 700, cursor: 'pointer',
+              fontFamily: "'Nunito',sans-serif",
+              boxShadow: '0 4px 16px rgba(199,125,255,0.35)',
+            }}
+          >
+            Start Searching
+          </button>
+        </div>
+      ) : (
+        <div style={{ paddingBottom: 80 }}>
+          <SectionRow
+            title="Recently Scored"
+            icon={(p) => <Icons.Clock {...p}/>}
+            iconColor={C.purple}
+            books={sections.recentlyScored}
+            loading={loading}
+            onSelect={onSelect}
+          />
+          <SectionRow
+            title="Highest Rated"
+            icon={(p) => <Icons.Star {...p}/>}
+            iconColor={C.yellow}
+            books={sections.highestRated}
+            loading={loading}
+            onSelect={onSelect}
+          />
+          <SectionRow
+            title="Random Picks"
+            icon={(p) => <Icons.Shuffle {...p}/>}
+            iconColor={C.pink}
+            books={sections.randomPicks}
+            loading={loading}
+            onSelect={onSelect}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
 
-      {/* Title */}
-      <h3 style={{
-        fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"15px",
-        lineHeight:1.3, color:C.text,
-        overflow:"hidden", textOverflow:"ellipsis",
-        display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical",
-      }}>{book.title}</h3>
+// ─── Search Tab ───────────────────────────────────────────────────────────────
+function SearchTab({ onSelect, onRequest }) {
+  const [query, setQuery]           = useState('');
+  const [results, setResults]       = useState([]);
+  const [searching, setSearching]   = useState(false);
+  const [searched, setSearched]     = useState(false);
+  const [showISBN, setShowISBN]     = useState(false);
+  const [isbnValue, setIsbnValue]   = useState('');
+  const [recentSearches, setRecent] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ss_recent') || '[]'); } catch { return []; }
+  });
+  const debounceRef = useRef(null);
+  const inputRef    = useRef(null);
 
-      {/* Author */}
-      <button
-        onClick={e => { e.stopPropagation(); onAuthorClick?.(book.author); }}
-        style={{ fontSize:"12px", fontWeight:600, color:C.purple, background:"none", border:"none", padding:0, cursor:"pointer", fontFamily:"'Nunito',sans-serif", textAlign:"left", alignSelf:"flex-start" }}
-      >{book.author}</button>
+  useEffect(() => { setTimeout(() => inputRef.current?.focus(), 150); }, []);
 
-      {/* Spice + Indie */}
-      <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-        {book.spiceLevel != null && <SpiceBadge level={book.spiceLevel}/>}
-        {book.isIndie === 1 && (
-          <span style={{ display:"inline-flex", padding:"5px 11px", borderRadius:"8px", fontSize:"11px", fontWeight:700, fontFamily:"'Sora',sans-serif", background:`${C.purple}18`, border:`1.5px solid ${C.purple}40`, color:C.purple, letterSpacing:"0.3px" }}>INDIE</span>
+  const saveRecent = (q) => {
+    const updated = [q, ...recentSearches.filter((x) => x !== q)].slice(0, 5);
+    setRecent(updated);
+    try { localStorage.setItem('ss_recent', JSON.stringify(updated)); } catch {}
+  };
+
+  const doSearch = useCallback(async (q) => {
+    if (!q.trim()) { setResults([]); setSearched(false); return; }
+    setSearching(true);
+    setSearched(true);
+    saveRecent(q.trim());
+    try {
+      const res = await fetch(`/api/books/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setResults(Array.isArray(data) ? data : (data.books || []));
+    } catch { setResults([]); }
+    finally { setSearching(false); }
+  }, [recentSearches]);
+
+  const handleChange = (e) => {
+    const val = e.target.value;
+    setQuery(val);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => doSearch(val), 320);
+  };
+
+  const clearSearch = () => { setQuery(''); setResults([]); setSearched(false); inputRef.current?.focus(); };
+
+  const handleISBNSearch = async () => {
+    if (!isbnValue.trim()) return;
+    setQuery(isbnValue);
+    setShowISBN(false);
+    await doSearch(isbnValue);
+    setIsbnValue('');
+  };
+
+  return (
+    <div className="main-scroll">
+      <div style={{ padding: '24px 16px 16px' }}>
+        <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 22, fontWeight: 700, marginBottom: 16 }}>
+          Search
+        </h2>
+
+        {/* Search input */}
+        <div style={{ position: 'relative', marginBottom: 12 }}>
+          <input
+            ref={inputRef}
+            className="search-input"
+            value={query}
+            onChange={handleChange}
+            onKeyDown={(e) => e.key === 'Enter' && doSearch(query)}
+            placeholder="Title, author, series, or ISBN..."
+            autoComplete="off" autoCorrect="off" spellCheck={false}
+          />
+          <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', display: 'flex', gap: 4 }}>
+            {query && (
+              <button onClick={clearSearch} aria-label="Clear"
+                style={{
+                  width: 32, height: 32, borderRadius: '50%',
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: C.textSubtle,
+                }}
+              >
+                <Icons.X width={16} height={16}/>
+              </button>
+            )}
+            <button
+              onClick={() => alert('Camera ISBN scanning coming soon!')}
+              aria-label="Scan ISBN"
+              style={{
+                width: 32, height: 32, borderRadius: '50%',
+                background: 'none', border: 'none', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: C.textSubtle,
+              }}
+            >
+              <Icons.Camera width={18} height={18}/>
+            </button>
+          </div>
+        </div>
+
+        {/* ISBN toggle */}
+        <button
+          onClick={() => setShowISBN((v) => !v)}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: C.purple, fontSize: 13, fontWeight: 700,
+            fontFamily: "'Nunito',sans-serif", padding: '4px 0',
+            marginBottom: showISBN ? 12 : 0,
+          }}
+        >
+          {showISBN ? 'Hide ISBN input' : 'Enter ISBN manually'}
+        </button>
+
+        {/* ISBN input */}
+        {showISBN && (
+          <div className="fade-slide" style={{
+            background: 'rgba(199,125,255,0.06)',
+            border: '1px solid rgba(199,125,255,0.15)',
+            borderRadius: 12, padding: 14, marginBottom: 12,
+          }}>
+            <label style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, display: 'block', marginBottom: 8 }}>
+              ISBN (10 or 13 digits)
+            </label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                className="search-input"
+                style={{ padding: '10px 14px' }}
+                type="text"
+                inputMode="numeric"
+                placeholder="9781234567890"
+                value={isbnValue}
+                onChange={(e) => setIsbnValue(e.target.value.replace(/[^0-9]/g, ''))}
+                maxLength={13}
+              />
+              <button
+                className="btn-press"
+                onClick={handleISBNSearch}
+                style={{
+                  padding: '10px 16px', background: GRAD,
+                  color: '#fff', border: 'none', borderRadius: 10,
+                  fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                  fontFamily: "'Nunito',sans-serif", flexShrink: 0,
+                  minHeight: 44,
+                }}
+              >
+                Search
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Recent searches */}
+        {!searched && !searching && recentSearches.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <p style={{ fontSize: 11, color: C.textSubtle, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+              Recent
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {recentSearches.map((q, i) => (
+                <button
+                  key={i}
+                  className="btn-press"
+                  onClick={() => { setQuery(q); doSearch(q); }}
+                  style={{
+                    padding: '7px 14px', borderRadius: 20,
+                    background: 'rgba(199,125,255,0.08)',
+                    border: '1px solid rgba(199,125,255,0.15)',
+                    color: C.textMuted, fontSize: 13, cursor: 'pointer',
+                    fontFamily: "'Nunito',sans-serif",
+                    minHeight: 36,
+                  }}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* States */}
+        {searching && (
+          <div style={{ textAlign: 'center', padding: '48px 0', color: C.textSubtle }}>
+            <div style={{
+              width: 28, height: 28, border: '3px solid rgba(199,125,255,0.15)',
+              borderTopColor: C.purple, borderRadius: '50%',
+              animation: 'spin 0.7s linear infinite',
+              margin: '0 auto 14px',
+            }}/>
+            Searching...
+          </div>
+        )}
+
+        {!searching && searched && results.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '48px 0' }}>
+            <Icons.Search width={44} height={44} style={{ color: C.textSubtle }}/>
+            <p style={{ color: C.textMuted, marginTop: 14, fontSize: 15, fontWeight: 600 }}>
+              No results found
+            </p>
+            <p style={{ color: C.textSubtle, marginTop: 6, fontSize: 13 }}>
+              Try different keywords or check spelling
+            </p>
+          </div>
+        )}
+
+        {!searching && !searched && recentSearches.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '48px 0' }}>
+            <Icons.Search width={48} height={48} style={{ color: 'rgba(199,125,255,0.25)' }}/>
+            <p style={{ color: C.textSubtle, marginTop: 14, fontSize: 14 }}>
+              Search 1,000 romance books
+            </p>
+          </div>
         )}
       </div>
 
-      {/* Genre chips */}
-      {genres.length > 0 && (
-        <div className="no-sb" style={{ display:"flex", gap:"6px", overflowX:"auto" }}>
-          {genres.slice(0,5).map((g,i) => (
-            <GenreChip key={i} onClick={e => { e.stopPropagation(); onGenreClick?.(g); }}>{g}</GenreChip>
+      {!searching && results.length > 0 && (
+        <div className="books-grid" style={{ paddingTop: 0 }}>
+          {results.map((book, i) => (
+            <BookCard key={book.id} book={book} onSelect={() => {}} onRequest={onRequest} index={i}/>
           ))}
         </div>
       )}
-
-      {/* Footer */}
-      <div style={{ borderTop:"1px solid rgba(0,0,0,0.07)", paddingTop:"10px", display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:"auto" }}>
-        <span style={{ fontSize:"11px", fontWeight:700, fontFamily:"'Sora',sans-serif", color:qColor(book.qualityScore??0), letterSpacing:"0.05em" }}>
-          {qLabel(book.qualityScore??0).toUpperCase()}
-        </span>
-        {book.readers != null && (
-          <span style={{ fontSize:"11px", color:C.textMuted, fontWeight:600 }}>{fmt(book.readers)} readers</span>
-        )}
-      </div>
     </div>
   );
 }
 
-// ─── Quality Legend Modal ─────────────────────────────────────────────────────
-function QualityLegend({ onClose }) {
-  const ranges = [
-    { r:"90–100", l:"Exceptional", c:C.q90, d:"Polished prose, confident pacing, strong craft throughout. Technically rare." },
-    { r:"80–89",  l:"Strong",      c:C.q80, d:"Well-crafted with minor inconsistencies. Reads professionally and delivers on its premise." },
-    { r:"70–79",  l:"Solid",       c:C.q70, d:"Competent work with noticeable rough patches. Still enjoyable for most readers." },
-    { r:"60–69",  l:"Uneven",      c:C.q60, d:"Clear weaknesses in execution. Moments of quality alongside significant problems." },
-    { r:"Below 60",l:"Rough",      c:C.qLow,d:"Technical issues impact the reading experience. Proceed with full awareness." },
-  ];
-  const dims = [
-    { n:"Technical Quality", d:"Grammar, spelling, and mechanical consistency." },
-    { n:"Prose Style",       d:"Voice, sentence variety, and word choice." },
-    { n:"Pacing",            d:"Scene structure, tension management, and narrative momentum." },
-    { n:"Readability",       d:"Flow, clarity, and how smoothly the book reads." },
-    { n:"Craft Execution",   d:"Plot coherence, character consistency, and overall construction." },
-  ];
+// ─── Book Detail Modal ─────────────────────────────────────────────────────────
+function BookModal({ book, onClose, onRequest }) {
+  const scored = book.qualityScore > 0;
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, []);
+
+  const dims = book.dimensions || [];
+
   return (
-    <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:2000, background:"rgba(18,12,31,0.82)", backdropFilter:"blur(10px)", display:"flex", alignItems:"center", justifyContent:"center", padding:"20px" }}>
-      <div onClick={e=>e.stopPropagation()} style={{ background:"linear-gradient(145deg,#1e1040,#2d1b4e)", border:"1px solid rgba(199,125,255,0.2)", borderRadius:"24px", padding:"32px", maxWidth:"540px", width:"100%", maxHeight:"85vh", overflowY:"auto", boxShadow:"0 24px 64px rgba(0,0,0,0.6)" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"20px" }}>
-          <h2 style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"19px", color:"#f0e6ff" }}>How Scores Work</h2>
-          <button onClick={onClose} style={{ color:"rgba(255,255,255,0.4)", fontSize:"20px", lineHeight:1, padding:"4px 8px" }}>✕</button>
-        </div>
-        <p style={{ fontSize:"14px", color:"rgba(255,255,255,0.55)", lineHeight:1.65, marginBottom:"22px" }}>
-          Scores are generated by analyzing reader reviews with a calibrated AI model. The overall score is a weighted average of five craft dimensions. Scores reflect writing quality only — not personal enjoyment or content type.
-        </p>
-        <h3 style={{ fontSize:"11px", fontWeight:700, letterSpacing:"0.08em", color:"rgba(255,255,255,0.32)", marginBottom:"12px", fontFamily:"'Sora',sans-serif" }}>SCORE RANGES</h3>
-        <div style={{ display:"flex", flexDirection:"column", gap:"10px", marginBottom:"26px" }}>
-          {ranges.map(({r,l,c,d}) => (
-            <div key={r} style={{ display:"flex", gap:"14px", alignItems:"flex-start" }}>
-              <div style={{ minWidth:"64px", flexShrink:0 }}>
-                <div style={{ fontSize:"13px", fontWeight:800, fontFamily:"'Sora',sans-serif", color:c }}>{r}</div>
-                <div style={{ fontSize:"10px", fontWeight:700, color:c, opacity:0.75, letterSpacing:"0.05em" }}>{l.toUpperCase()}</div>
-              </div>
-              <p style={{ fontSize:"13px", color:"rgba(255,255,255,0.55)", lineHeight:1.55, margin:0 }}>{d}</p>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-sheet modal-enter" onClick={(e) => e.stopPropagation()}>
+        {/* Pull handle */}
+        <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.15)', margin: '0 auto 20px' }}/>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 20 }}>
+          <div>
+            {scored
+              ? <QualityRing score={book.qualityScore} size={80}/>
+              : <UnscoredBadge book={book} onRequest={onRequest}/>
+            }
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h2 style={{
+              fontFamily: "'Sora',sans-serif", fontSize: 18, fontWeight: 800,
+              color: C.text, lineHeight: 1.3, marginBottom: 4,
+            }}>{book.title}</h2>
+            <p style={{ fontSize: 14, color: C.textMuted, marginBottom: 10 }}>{book.author}</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {book.spiceLevel !== null && book.spiceLevel !== undefined && (
+                <SpiceLevelBadge level={book.spiceLevel} variant="default"/>
+              )}
+              {book.genre && (
+                <span className="tag" style={{ background: 'rgba(255,255,255,0.06)', color: C.textSubtle, padding: '4px 10px' }}>
+                  {book.genre}
+                </span>
+              )}
             </div>
-          ))}
-        </div>
-        <h3 style={{ fontSize:"11px", fontWeight:700, letterSpacing:"0.08em", color:"rgba(255,255,255,0.32)", marginBottom:"12px", fontFamily:"'Sora',sans-serif" }}>THE FIVE DIMENSIONS</h3>
-        <div style={{ display:"flex", flexDirection:"column", gap:"9px" }}>
-          {dims.map(({n,d}) => (
-            <div key={n}><span style={{ fontSize:"13px", fontWeight:700, color:"#c8aaee" }}>{n}: </span><span style={{ fontSize:"13px", color:"rgba(255,255,255,0.5)" }}>{d}</span></div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Advanced Filters ─────────────────────────────────────────────────────────
-function AdvancedFilters({ filters, onChange, onClose }) {
-  const spiceOpts = C.spiceLbl.map((l,i) => ({ v:i, label:`${l} (${i})`, col:C.spice[i] }));
-  const endings   = ["HEA","HFN","Bittersweet","Open","Cliffhanger"];
-  const moods     = ["Funny","Dark","Emotional","Cozy","Suspenseful","Steamy","Wholesome"];
-  const toggle = k => onChange({ ...filters, [k]: !filters[k] });
-  const pick   = (k,v) => onChange({ ...filters, [k]: filters[k]===v ? null : v });
-
-  return (
-    <div style={{ background:"rgba(24,14,52,0.98)", backdropFilter:"blur(20px)", border:"1px solid rgba(199,125,255,0.2)", borderRadius:"20px", padding:"24px", marginBottom:"20px", boxShadow:"0 16px 48px rgba(0,0,0,0.4)" }} className="fade-up">
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"20px" }}>
-        <h3 style={{ fontFamily:"'Sora',sans-serif", fontWeight:700, fontSize:"15px", color:"#f0e6ff" }}>Advanced Filters</h3>
-        <button onClick={onClose} style={{ color:"rgba(255,255,255,0.4)", fontSize:"18px", lineHeight:1 }}>✕</button>
-      </div>
-
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:"20px" }}>
-        {/* Max Spice */}
-        <div>
-          <label style={{ display:"block", fontSize:"11px", fontWeight:700, letterSpacing:"0.07em", color:"rgba(255,255,255,0.38)", marginBottom:"10px", fontFamily:"'Sora',sans-serif" }}>MAX SPICE</label>
-          <div style={{ display:"flex", gap:"5px", flexWrap:"wrap" }}>
-            {spiceOpts.map(({v,label,col}) => (
-              <button key={v} onClick={() => pick("maxSpice",v)} style={{ padding:"5px 10px", borderRadius:"8px", fontSize:"11px", fontWeight:700, fontFamily:"'Sora',sans-serif", border:`1.5px solid ${filters.maxSpice===v ? col : "rgba(255,255,255,0.1)"}`, background: filters.maxSpice===v ? `${col}22` : "transparent", color: filters.maxSpice===v ? col : "rgba(255,255,255,0.5)", cursor:"pointer", whiteSpace:"nowrap" }}>{label}</button>
-            ))}
           </div>
-        </div>
-
-        {/* Ending */}
-        <div>
-          <label style={{ display:"block", fontSize:"11px", fontWeight:700, letterSpacing:"0.07em", color:"rgba(255,255,255,0.38)", marginBottom:"10px", fontFamily:"'Sora',sans-serif" }}>ENDING TYPE</label>
-          <div style={{ display:"flex", gap:"5px", flexWrap:"wrap" }}>
-            {endings.map(e => (
-              <button key={e} onClick={() => pick("ending",e)} style={{ padding:"5px 11px", borderRadius:"8px", fontSize:"11px", fontWeight:700, fontFamily:"'Sora',sans-serif", border:`1.5px solid ${filters.ending===e ? C.purple : "rgba(255,255,255,0.1)"}`, background: filters.ending===e ? `${C.purple}22` : "transparent", color: filters.ending===e ? C.purple : "rgba(255,255,255,0.5)", cursor:"pointer" }}>{e}</button>
-            ))}
-          </div>
-        </div>
-
-        {/* Mood */}
-        <div>
-          <label style={{ display:"block", fontSize:"11px", fontWeight:700, letterSpacing:"0.07em", color:"rgba(255,255,255,0.38)", marginBottom:"10px", fontFamily:"'Sora',sans-serif" }}>MOOD</label>
-          <div style={{ display:"flex", gap:"5px", flexWrap:"wrap" }}>
-            {moods.map(m => (
-              <button key={m} onClick={() => pick("mood",m)} style={{ padding:"5px 11px", borderRadius:"8px", fontSize:"11px", fontWeight:700, fontFamily:"'Sora',sans-serif", border:`1.5px solid ${filters.mood===m ? C.pink : "rgba(255,255,255,0.1)"}`, background: filters.mood===m ? `${C.pink}22` : "transparent", color: filters.mood===m ? C.pink : "rgba(255,255,255,0.5)", cursor:"pointer" }}>{m}</button>
-            ))}
-          </div>
-        </div>
-
-        {/* Toggles */}
-        <div style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
-          <label style={{ fontSize:"11px", fontWeight:700, letterSpacing:"0.07em", color:"rgba(255,255,255,0.38)", fontFamily:"'Sora',sans-serif" }}>OPTIONS</label>
-          {[{k:"indieOnly",l:"Indie Only"},{k:"seriesComplete",l:"Completed Series"},{k:"noWarnings",l:"No Content Warnings"}].map(({k,l}) => (
-            <label key={k} style={{ display:"flex", alignItems:"center", gap:"10px", cursor:"pointer" }}>
-              <div onClick={() => toggle(k)} style={{ width:"36px", height:"20px", borderRadius:"10px", background: filters[k] ? `linear-gradient(135deg,${C.pink},${C.purple})` : "rgba(255,255,255,0.12)", position:"relative", flexShrink:0, transition:"background 0.2s ease", cursor:"pointer" }}>
-                <div style={{ position:"absolute", top:"3px", left: filters[k] ? "18px" : "3px", width:"14px", height:"14px", borderRadius:"50%", background:"#fff", transition:"left 0.2s ease", boxShadow:"0 1px 4px rgba(0,0,0,0.3)" }}/>
-              </div>
-              <span style={{ fontSize:"13px", fontWeight:600, color:"rgba(255,255,255,0.7)" }}>{l}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ marginTop:"18px", paddingTop:"16px", borderTop:"1px solid rgba(255,255,255,0.06)", display:"flex", justifyContent:"flex-end" }}>
-        <button onClick={() => onChange({maxSpice:null,ending:null,mood:null,indieOnly:false,seriesComplete:false,noWarnings:false})} style={{ padding:"7px 18px", borderRadius:"50px", fontSize:"12px", fontWeight:700, fontFamily:"'Sora',sans-serif", border:"1.5px solid rgba(255,255,255,0.12)", color:"rgba(255,255,255,0.45)", background:"transparent" }}>Reset Filters</button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Recently Viewed ──────────────────────────────────────────────────────────
-function RecentlyViewed({ books, bookIds, onClick }) {
-  const viewed = bookIds.map(id => books.find(b => b.id===id || b.title===id)).filter(Boolean);
-  if (!viewed.length) return null;
-  return (
-    <div style={{ marginBottom:"32px" }}>
-      <h3 style={{ fontFamily:"'Sora',sans-serif", fontWeight:700, fontSize:"13px", color:"rgba(255,255,255,0.38)", letterSpacing:"0.07em", marginBottom:"12px" }}>RECENTLY VIEWED</h3>
-      <div className="no-sb" style={{ display:"flex", gap:"10px", overflowX:"auto", paddingBottom:"4px" }}>
-        {viewed.slice(0,8).map(b => (
-          <button key={b.id||b.title} onClick={() => onClick(b)} style={{ flexShrink:0, width:"120px", background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:"12px", padding:"12px 10px", cursor:"pointer", textAlign:"left", transition:"all 0.18s ease" }}>
-            <div style={{ marginBottom:"6px" }}><QRing score={b.qualityScore} size={36} strokeWidth={3}/></div>
-            <div style={{ fontSize:"11px", fontWeight:700, color:"rgba(255,255,255,0.85)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontFamily:"'Sora',sans-serif" }}>{b.title}</div>
+          <button onClick={onClose} aria-label="Close"
+            style={{
+              width: 36, height: 36, borderRadius: '50%',
+              background: 'rgba(255,255,255,0.08)',
+              border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <Icons.X width={18} height={18} style={{ color: C.textMuted }}/>
           </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Book Detail Page ─────────────────────────────────────────────────────────
-function BookDetailPage({ book, onBack, onGenreClick, onAuthorClick }) {
-  const genres   = arr(book.genres);
-  const warnings = arr(book.contentWarnings);
-  const themes   = arr(book.themes);
-  const moods    = arr(book.moods);
-  const col      = qColor(book.qualityScore ?? 0);
-
-  return (
-    <div style={{ maxWidth:"780px", margin:"0 auto", padding:"0 16px 80px" }} className="fade-up">
-      <button onClick={onBack} style={{ display:"inline-flex", alignItems:"center", gap:"6px", marginBottom:"24px", padding:"8px 16px", borderRadius:"50px", fontSize:"13px", fontWeight:700, fontFamily:"'Sora',sans-serif", border:"1.5px solid rgba(255,255,255,0.15)", color:"rgba(255,255,255,0.7)", background:"rgba(255,255,255,0.06)" }}>
-        ← Back
-      </button>
-
-      {/* Header */}
-      <div style={{ background:C.cardBg, borderRadius:"22px", padding:"28px", border:`1px solid ${C.cardBorder}`, boxShadow:C.shadow, marginBottom:"16px" }}>
-        <div style={{ display:"flex", gap:"20px", alignItems:"flex-start" }}>
-          <QRing score={book.qualityScore} size={80} strokeWidth={6}/>
-          <div style={{ flex:1, minWidth:0 }}>
-            <h1 style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"22px", color:C.text, lineHeight:1.2, marginBottom:"6px" }}>{book.title}</h1>
-            <button onClick={() => onAuthorClick?.(book.author)} style={{ fontSize:"14px", fontWeight:700, color:C.purple, background:"none", border:"none", padding:0, cursor:"pointer", fontFamily:"'Nunito',sans-serif" }}>{book.author}</button>
-            <div style={{ display:"flex", gap:"6px", flexWrap:"wrap", marginTop:"12px" }}>
-              {book.spiceLevel != null && <SpiceBadge level={book.spiceLevel}/>}
-              {book.isIndie === 1 && <span style={{ padding:"5px 11px", borderRadius:"8px", fontSize:"11px", fontWeight:700, fontFamily:"'Sora',sans-serif", background:`${C.purple}18`, border:`1.5px solid ${C.purple}40`, color:C.purple }}>INDIE</span>}
-              {book.endingType && <span style={{ padding:"5px 11px", borderRadius:"8px", fontSize:"11px", fontWeight:700, fontFamily:"'Sora',sans-serif", background:"rgba(34,197,94,0.1)", border:"1px solid rgba(34,197,94,0.25)", color:"#22c55e" }}>{book.endingType}</span>}
-              {warnings.length > 0 && <WarningBadge/>}
-            </div>
-          </div>
         </div>
 
-        {book.seriesName && (
-          <div style={{ marginTop:"14px", padding:"10px 14px", background:"rgba(96,165,250,0.08)", border:"1px solid rgba(96,165,250,0.2)", borderRadius:"10px" }}>
-            <span style={{ fontSize:"13px", fontWeight:600, color:"#60a5fa" }}>
-              {book.seriesName}{book.seriesNumber ? ` — Book ${book.seriesNumber}` : ""}{book.seriesTotal ? ` of ${book.seriesTotal}` : ""} · {book.seriesIsComplete ? "Complete" : "Ongoing"}
+        <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', marginBottom: 20 }}/>
+
+        {/* Spice description (detailed) */}
+        {book.spiceLevel !== null && book.spiceLevel !== undefined && (
+          <div style={{ marginBottom: 20 }}>
+            <SpiceLevelBadge level={book.spiceLevel} variant="detailed" showDescription/>
+          </div>
+        )}
+
+        {/* Series */}
+        {book.series && (
+          <div style={{
+            background: 'rgba(199,125,255,0.08)',
+            border: '1px solid rgba(199,125,255,0.2)',
+            borderRadius: 10, padding: '10px 14px', marginBottom: 16,
+          }}>
+            <span style={{ fontSize: 13, color: C.purple, fontWeight: 600 }}>
+              Series: {book.series}{book.seriesNumber ? ` #${book.seriesNumber}` : ''}
             </span>
           </div>
         )}
 
-        {book.synopsis && <p style={{ marginTop:"14px", fontSize:"14px", color:C.textMid, lineHeight:1.65 }}>{book.synopsis}</p>}
+        {/* Description */}
+        {book.description && (
+          <div style={{ marginBottom: 20 }}>
+            <p style={{ fontSize: 12, color: C.textSubtle, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 8, fontFamily: "'Sora',sans-serif" }}>
+              About
+            </p>
+            <p style={{ fontSize: 14, color: C.textMuted, lineHeight: 1.65 }}>{book.description}</p>
+          </div>
+        )}
 
-        {genres.length > 0 && (
-          <div className="no-sb" style={{ display:"flex", gap:"6px", overflowX:"auto", marginTop:"14px" }}>
-            {genres.map((g,i) => <GenreChip key={i} onClick={() => onGenreClick?.(g)}>{g}</GenreChip>)}
+        {/* Score breakdown */}
+        {scored && dims.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <p style={{ fontSize: 12, color: C.textSubtle, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginBottom: 12, fontFamily: "'Sora',sans-serif" }}>
+              Score Breakdown
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {dims.map((d) => {
+                const pct = (d.score / 10) * 100;
+                const col = d.score >= 8 ? C.green : d.score >= 6 ? C.yellow : C.danger;
+                return (
+                  <div key={d.name}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 13, color: C.textMuted }}>{d.name}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: col }}>{d.score}/10</span>
+                    </div>
+                    <div style={{ height: 6, background: 'rgba(255,255,255,0.07)', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: col, borderRadius: 3, transition: 'width 0.6s ease' }}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Content warnings */}
+        {book.contentWarnings && book.contentWarnings.length > 0 && (
+          <div style={{
+            background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.18)',
+            borderRadius: 10, padding: '10px 14px',
+          }}>
+            <p style={{ fontSize: 11, color: C.danger, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+              Content Warnings
+            </p>
+            <p style={{ fontSize: 13, color: C.textMuted }}>{book.contentWarnings.join(' · ')}</p>
           </div>
         )}
       </div>
-
-      {/* Quality */}
-      <div style={{ background:C.cardBg, borderRadius:"22px", padding:"28px", border:`1px solid ${C.cardBorder}`, boxShadow:C.shadow, marginBottom:"16px" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:"20px" }}>
-          <h2 style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"17px", color:C.text }}>Writing Quality</h2>
-          <div style={{ textAlign:"right" }}>
-            <div style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"30px", color:col, lineHeight:1 }}>{book.qualityScore ?? "—"}</div>
-            <div style={{ fontSize:"11px", fontWeight:700, color:col, letterSpacing:"0.05em" }}>{qLabel(book.qualityScore??0).toUpperCase()}</div>
-          </div>
-        </div>
-        <DimBar label="Technical Quality" score={book.technicalQuality} note={book.technicalQualityNote}/>
-        <DimBar label="Prose Style"       score={book.proseStyle}       note={book.proseStyleNote}/>
-        <DimBar label="Pacing"            score={book.pacing}           note={book.pacingNote}/>
-        <DimBar label="Readability"       score={book.readability}      note={book.readabilityNote}/>
-        <DimBar label="Craft Execution"   score={book.craftExecution}   note={book.craftExecutionNote}/>
-        {book.confidenceLevel && (
-          <div style={{ marginTop:"14px", paddingTop:"12px", borderTop:"1px solid rgba(0,0,0,0.06)", fontSize:"12px", color:C.textMuted }}>
-            <span style={{ fontWeight:700, textTransform:"uppercase", marginRight:"6px", color: book.confidenceLevel==="high" ? C.q90 : book.confidenceLevel==="medium" ? C.q70 : C.qLow }}>{book.confidenceLevel}</span>
-            confidence{book.voteCount > 0 ? ` · based on ${book.voteCount} reviews` : ""}
-          </div>
-        )}
-      </div>
-
-      {/* Content Details */}
-      {(warnings.length > 0 || themes.length > 0 || moods.length > 0) && (
-        <div style={{ background:C.cardBg, borderRadius:"22px", padding:"28px", border:`1px solid ${C.cardBorder}`, boxShadow:C.shadow }}>
-          <h2 style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"17px", color:C.text, marginBottom:"18px" }}>Content Details</h2>
-          {warnings.length > 0 && (
-            <div style={{ marginBottom:"16px" }}>
-              <div style={{ fontSize:"11px", fontWeight:700, letterSpacing:"0.07em", color:C.textMuted, marginBottom:"8px", fontFamily:"'Sora',sans-serif" }}>CONTENT WARNINGS</div>
-              <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-                {warnings.map((w,i) => <span key={i} style={{ padding:"4px 10px", borderRadius:"6px", fontSize:"12px", fontWeight:600, background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.2)", color:"#ef4444" }}>{w}</span>)}
-              </div>
-            </div>
-          )}
-          {themes.length > 0 && (
-            <div style={{ marginBottom:"16px" }}>
-              <div style={{ fontSize:"11px", fontWeight:700, letterSpacing:"0.07em", color:C.textMuted, marginBottom:"8px", fontFamily:"'Sora',sans-serif" }}>THEMES</div>
-              <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-                {themes.map((t,i) => <GenreChip key={i}>{t}</GenreChip>)}
-              </div>
-            </div>
-          )}
-          {moods.length > 0 && (
-            <div>
-              <div style={{ fontSize:"11px", fontWeight:700, letterSpacing:"0.07em", color:C.textMuted, marginBottom:"8px", fontFamily:"'Sora',sans-serif" }}>MOODS</div>
-              <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-                {moods.map((m,i) => <span key={i} style={{ padding:"4px 10px", borderRadius:"6px", fontSize:"12px", fontWeight:600, background:`${C.purple}12`, border:`1px solid ${C.purple}20`, color:C.textMid }}>{m}</span>)}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
 
-// ─── Author Page ──────────────────────────────────────────────────────────────
-function AuthorPage({ authorName, books, onBack, onBookClick, onGenreClick }) {
-  const authorBooks = books.filter(b => b.author === authorName);
-  const avgScore = authorBooks.length
-    ? Math.round(authorBooks.reduce((s,b) => s+(b.qualityScore||0),0) / authorBooks.length)
-    : null;
+// ─── Placeholder Tab ──────────────────────────────────────────────────────────
+function PlaceholderTab({ label, IconComp, description }) {
   return (
-    <div style={{ maxWidth:"960px", margin:"0 auto", padding:"0 16px 80px" }} className="fade-up">
-      <button onClick={onBack} style={{ display:"inline-flex", alignItems:"center", gap:"6px", marginBottom:"24px", padding:"8px 16px", borderRadius:"50px", fontSize:"13px", fontWeight:700, fontFamily:"'Sora',sans-serif", border:"1.5px solid rgba(255,255,255,0.15)", color:"rgba(255,255,255,0.7)", background:"rgba(255,255,255,0.06)" }}>
-        ← Back
-      </button>
-      <h1 style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"28px", color:"#f0e6ff", marginBottom:"8px" }}>{authorName}</h1>
-      <div style={{ display:"flex", gap:"16px", marginBottom:"28px" }}>
-        <span style={{ fontSize:"14px", color:"rgba(255,255,255,0.45)" }}>{authorBooks.length} scored book{authorBooks.length!==1?"s":""}</span>
-        {avgScore != null && <span style={{ fontSize:"14px", fontWeight:700, color:qColor(avgScore) }}>Avg {avgScore} — {qLabel(avgScore)}</span>}
-      </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))", gap:"20px" }}>
-        {authorBooks.map(b => (
-          <BookCard key={b.id||b.title} book={b} onClick={onBookClick} onAuthorClick={()=>{}} onGenreClick={onGenreClick}/>
-        ))}
+    <div className="main-scroll">
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        justifyContent: 'center', minHeight: '60vh', gap: 12,
+        padding: 32, textAlign: 'center',
+      }}>
+        <div style={{
+          width: 80, height: 80, borderRadius: '50%',
+          background: 'rgba(199,125,255,0.08)',
+          border: '2px solid rgba(199,125,255,0.18)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8,
+        }}>
+          <IconComp width={32} height={32} style={{ color: 'rgba(199,125,255,0.45)' }}/>
+        </div>
+        <h2 style={{ fontFamily: "'Sora',sans-serif", fontSize: 22, fontWeight: 700 }}>{label}</h2>
+        <p style={{ fontSize: 14, color: C.textSubtle, maxWidth: 260, lineHeight: 1.6 }}>{description}</p>
+        <div style={{
+          marginTop: 8, padding: '8px 20px', borderRadius: 20,
+          background: 'rgba(199,125,255,0.09)',
+          border: '1px solid rgba(199,125,255,0.2)',
+          fontSize: 13, color: C.purple, fontWeight: 700,
+        }}>
+          Coming soon
+        </div>
       </div>
     </div>
   );
 }
 
-// ─── Main App ─────────────────────────────────────────────────────────────────
-export default function StyleScope() {
-  // Inject CSS
-  useEffect(() => {
-    const id = "ss-global";
-    if (!document.getElementById(id)) {
-      const s = document.createElement("style");
-      s.id = id; s.textContent = GLOBAL_CSS;
-      document.head.appendChild(s);
-    }
-  }, []);
+// ─── Bottom Nav ───────────────────────────────────────────────────────────────
+const TABS = [
+  { key: 'home',    label: 'Home',    IconComp: Icons.Home    },
+  { key: 'search',  label: 'Search',  IconComp: Icons.Search  },
+  { key: 'library', label: 'Library', IconComp: Icons.Library },
+  { key: 'profile', label: 'Profile', IconComp: Icons.Profile },
+];
 
-  // Data
-  const [books,    setBooks]    = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [apiError, setApiError] = useState(null);
+function BottomNav({ active, onTab }) {
+  return (
+    <nav className="bottom-nav" aria-label="Main navigation">
+      {TABS.map(({ key, label, IconComp }) => {
+        const on = active === key;
+        return (
+          <button key={key} className="nav-btn" onClick={() => onTab(key)}
+            aria-label={label} aria-current={on ? 'page' : undefined}
+          >
+            <IconComp width={22} height={22} style={{ color: on ? C.purple : C.textSubtle, transition: 'color 0.2s' }}/>
+            <span style={{
+              fontSize: 10, fontFamily: "'Nunito',sans-serif",
+              fontWeight: on ? 700 : 500, color: on ? C.purple : C.textSubtle,
+              transition: 'color 0.2s',
+            }}>{label}</span>
+            {on && (
+              <span style={{
+                position: 'absolute', bottom: 6, left: '50%', transform: 'translateX(-50%)',
+                width: 4, height: 4, borderRadius: '50%', background: C.purple,
+              }}/>
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
 
-  // Routing
-  const [view,           setView]           = useState("browse");
-  const [selectedBook,   setSelectedBook]   = useState(null);
-  const [selectedAuthor, setSelectedAuthor] = useState(null);
+// ─── Root App ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const [tab, setTab]           = useState('home');
+  const [selected, setSelected] = useState(null);
 
-  // Search + filters
-  const [searchQuery,  setSearchQuery]  = useState("");
-  const [minQuality,   setMinQuality]   = useState(null);
-  const [genreFilter,  setGenreFilter]  = useState(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [advFilters,   setAdvFilters]   = useState({
-    maxSpice:null, ending:null, mood:null,
-    indieOnly:false, seriesComplete:false, noWarnings:false,
-  });
-
-  // Modals + misc
-  const [showLegend,       setShowLegend]       = useState(false);
-  const [recentIds,        setRecentIds]        = useState([]);
-  const [onDemandTitle,    setOnDemandTitle]    = useState("");
-  const [onDemandAuthor,   setOnDemandAuthor]   = useState("");
-  const [onDemandProgress, setOnDemandProgress] = useState(null);
-  const [onDemandError,    setOnDemandError]    = useState(null);
-
-  // Fetch
-  useEffect(() => {
-    fetch(`${API_BASE}/api/books`)
-      .then(r => { if (!r.ok) throw new Error(`Server error ${r.status}`); return r.json(); })
-      .then(d => { setBooks(d); setLoading(false); })
-      .catch(e => { setApiError(e.message); setLoading(false); });
-  }, []);
-
-  // Navigation
-  const openBook = useCallback((book) => {
-    setSelectedBook(book); setView("book");
-    setRecentIds(p => [book.id||book.title, ...p.filter(id=>id!==(book.id||book.title))].slice(0,10));
-    window.scrollTo(0,0);
-  }, []);
-  const openAuthor = useCallback((name) => {
-    setSelectedAuthor(name); setView("author"); window.scrollTo(0,0);
-  }, []);
-  const goBack = useCallback(() => {
-    setView("browse"); setSelectedBook(null); setSelectedAuthor(null);
-  }, []);
-  const handleGenreClick = useCallback((g) => {
-    setGenreFilter(g); setView("browse"); window.scrollTo(0,0);
-  }, []);
-
-  // Filter
-  const filtered = books.filter(b => {
-    const q = searchQuery.toLowerCase().trim();
-    if (q && !b.title?.toLowerCase().includes(q) && !b.author?.toLowerCase().includes(q)) return false;
-    if (minQuality != null && (b.qualityScore??0) < minQuality) return false;
-    if (genreFilter && !arr(b.genres).some(g=>g.toLowerCase().includes(genreFilter.toLowerCase()))) return false;
-    if (advFilters.maxSpice != null && (b.spiceLevel??0) > advFilters.maxSpice) return false;
-    if (advFilters.ending && b.endingType !== advFilters.ending) return false;
-    if (advFilters.mood && !arr(b.moods).includes(advFilters.mood)) return false;
-    if (advFilters.indieOnly && b.isIndie !== 1) return false;
-    if (advFilters.seriesComplete && !b.seriesIsComplete) return false;
-    if (advFilters.noWarnings && arr(b.contentWarnings).length > 0) return false;
-    return true;
-  });
-
-  const activeAdvCount = [
-    advFilters.maxSpice != null, advFilters.ending, advFilters.mood,
-    advFilters.indieOnly, advFilters.seriesComplete, advFilters.noWarnings,
-  ].filter(Boolean).length;
-
-  // On-demand
-  async function handleOnDemand(e) {
-    e.preventDefault();
-    if (!onDemandTitle.trim() || !onDemandAuthor.trim()) return;
-    setOnDemandProgress("Starting…"); setOnDemandError(null);
+  const handleRequestScore = async (book) => {
     try {
-      const res = await fetch(`${API_BASE}/api/score-on-demand`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ title:onDemandTitle, author:onDemandAuthor }),
+      const res = await fetch('/api/score-on-demand', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: book.title, author: book.author }),
       });
-      if (!res.ok) { const e2 = await res.json(); throw new Error(e2.error||"Failed"); }
       const data = await res.json();
-      if (data.status === "exists") {
-        setBooks(p => p.find(b=>b.id===data.book.id)?p:[...p,data.book]);
-        setOnDemandProgress(null); openBook(data.book); return;
+      if (data.job_id) {
+        alert('Scoring request submitted! Check back in ~30 seconds.');
       }
-      const jid = data.job_id;
-      const poll = async () => {
-        try {
-          const sr = await fetch(`${API_BASE}/api/job-status/${jid}`);
-          const s = await sr.json();
-          setOnDemandProgress(s.progress||"Processing…");
-          if (s.status==="complete") {
-            setBooks(p=>p.find(b=>b.id===s.book.id)?p:[...p,s.book]);
-            setOnDemandProgress(null); openBook(s.book);
-          } else if (s.status==="failed") throw new Error(s.error||"Scoring failed");
-          else setTimeout(poll,2000);
-        } catch(err){ setOnDemandError(err.message); setOnDemandProgress(null); }
-      };
-      setTimeout(poll,2000);
-    } catch(err){ setOnDemandError(err.message); setOnDemandProgress(null); }
-  }
+    } catch (err) {
+      console.error('Score request failed:', err);
+      alert('Failed to request score. Please try again.');
+    }
+  };
 
-  // Subpages
-  if (view==="book" && selectedBook) return (
-    <div style={{ padding:"24px 0 0" }}>
-      <BookDetailPage book={selectedBook} onBack={goBack} onGenreClick={handleGenreClick} onAuthorClick={openAuthor}/>
-      {showLegend && <QualityLegend onClose={()=>setShowLegend(false)}/>}
-    </div>
-  );
-
-  if (view==="author" && selectedAuthor) return (
-    <div style={{ padding:"24px 0 0" }}>
-      <AuthorPage authorName={selectedAuthor} books={books} onBack={goBack} onBookClick={openBook} onGenreClick={handleGenreClick}/>
-    </div>
-  );
-
-  // ── Browse ────────────────────────────────────────────────────────────────────
   return (
-    <div style={{ minHeight:"100vh" }}>
+    <>
+      <style>{globalCSS}</style>
 
-      {/* Hero */}
-      <div style={{ padding:"56px 20px 36px", textAlign:"center", background:"linear-gradient(180deg,rgba(199,125,255,0.08) 0%,transparent 100%)", borderBottom:"1px solid rgba(255,255,255,0.06)", marginBottom:"32px" }}>
-        <div style={{ maxWidth:"660px", margin:"0 auto" }}>
+      {tab === 'home' && (
+        <HomeTab
+          onSelect={setSelected}
+          onRequest={handleRequestScore}
+          onGoSearch={() => setTab('search')}
+        />
+      )}
+      {tab === 'search' && (
+        <SearchTab
+          onSelect={setSelected}
+          onRequest={handleRequestScore}
+        />
+      )}
+      {tab === 'library' && (
+        <PlaceholderTab
+          label="Library"
+          IconComp={Icons.Library}
+          description="Save and organize your favorite reads. Your personal collection lives here."
+        />
+      )}
+      {tab === 'profile' && (
+        <PlaceholderTab
+          label="Profile"
+          IconComp={Icons.Profile}
+          description="Your reading stats, preferences, and scoring history will appear here."
+        />
+      )}
 
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"12px", marginBottom:"12px" }}>
-            <GlossyBookIcon size={44}/>
-            <h1 style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"clamp(26px,5vw,38px)", color:"#f0e6ff", letterSpacing:"-0.02em", lineHeight:1 }}>StyleScope</h1>
-          </div>
+      <BottomNav active={tab} onTab={setTab}/>
 
-          <p style={{ fontSize:"clamp(13px,2vw,15px)", color:"rgba(255,255,255,0.5)", lineHeight:1.5, marginBottom:"26px", fontFamily:"'Nunito',sans-serif" }}>
-            Know the writing quality before you read. Search by title or author to see quality scores, spice levels, and content warnings.
-          </p>
-
-          {/* Search */}
-          <div style={{ position:"relative", marginBottom:"14px" }}>
-            <span style={{ position:"absolute", left:"18px", top:"50%", transform:"translateY(-50%)", fontSize:"18px", color:"rgba(255,255,255,0.28)", pointerEvents:"none", userSelect:"none" }}>⌕</span>
-            <input
-              value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
-              placeholder="Search by title or author..."
-              style={{ width:"100%", padding:"14px 44px 14px 46px", borderRadius:"50px", border:"1.5px solid rgba(255,255,255,0.12)", background:"rgba(255,255,255,0.09)", color:"#fff", fontSize:"16px", fontWeight:500, backdropFilter:"blur(12px)", transition:"border-color 0.2s,box-shadow 0.2s" }}
-              onFocus={e=>{ e.target.style.borderColor="rgba(255,107,157,0.45)"; e.target.style.boxShadow="0 0 0 3px rgba(255,107,157,0.13)"; }}
-              onBlur={e=>{ e.target.style.borderColor="rgba(255,255,255,0.12)"; e.target.style.boxShadow="none"; }}
-            />
-            {searchQuery && (
-              <button onClick={()=>setSearchQuery("")} style={{ position:"absolute", right:"16px", top:"50%", transform:"translateY(-50%)", fontSize:"16px", color:"rgba(255,255,255,0.38)", lineHeight:1 }}>✕</button>
-            )}
-          </div>
-
-          {/* Quality pills */}
-          <div style={{ display:"flex", gap:"7px", justifyContent:"center", flexWrap:"wrap", marginBottom:"10px" }}>
-            <span style={{ fontSize:"11px", fontWeight:700, color:"rgba(255,255,255,0.32)", fontFamily:"'Sora',sans-serif", alignSelf:"center", letterSpacing:"0.06em" }}>MIN QUALITY:</span>
-            {[null,60,70,80,90].map(v => (
-              <Pill key={v??0} active={minQuality===v} color={v?qColor(v):C.purple} onClick={()=>setMinQuality(v)}>
-                {v==null?"All":`${v}+`}
-              </Pill>
-            ))}
-          </div>
-
-          {/* Controls row */}
-          <div style={{ display:"flex", gap:"7px", justifyContent:"center", flexWrap:"wrap" }}>
-            {genreFilter && (
-              <Pill active color={C.pink} onClick={()=>setGenreFilter(null)}>{genreFilter} ✕</Pill>
-            )}
-            <button
-              onClick={()=>setShowAdvanced(v=>!v)}
-              style={{ display:"inline-flex", alignItems:"center", gap:"6px", padding:"6px 14px", borderRadius:"50px", fontSize:"12px", fontWeight:700, fontFamily:"'Sora',sans-serif", border:`1.5px solid ${showAdvanced||activeAdvCount>0 ? C.purple : "rgba(255,255,255,0.18)"}`, background: showAdvanced||activeAdvCount>0 ? `${C.purple}20` : "rgba(255,255,255,0.07)", color: showAdvanced||activeAdvCount>0 ? C.purple : "rgba(255,255,255,0.65)", transition:"all 0.18s ease" }}
-            >
-              Advanced Filters
-              {activeAdvCount > 0 && (
-                <span style={{ background:C.purple, color:"#fff", borderRadius:"50px", padding:"1px 7px", fontSize:"10px", fontWeight:800 }}>{activeAdvCount}</span>
-              )}
-            </button>
-            <button
-              onClick={()=>setShowLegend(true)}
-              style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"6px 14px", borderRadius:"50px", fontSize:"12px", fontWeight:700, fontFamily:"'Sora',sans-serif", border:"1.5px solid rgba(255,255,255,0.14)", background:"rgba(255,255,255,0.06)", color:"rgba(255,255,255,0.5)" }}
-            >
-              <span style={{ width:"16px", height:"16px", borderRadius:"50%", border:"1.5px solid rgba(255,255,255,0.28)", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:"10px", fontWeight:800 }}>i</span>
-              How scores work
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Content */}
-      <div style={{ maxWidth:"1200px", margin:"0 auto", padding:"0 20px" }}>
-
-        {showAdvanced && (
-          <AdvancedFilters filters={advFilters} onChange={setAdvFilters} onClose={()=>setShowAdvanced(false)}/>
-        )}
-
-        {!loading && recentIds.length > 0 && (
-          <RecentlyViewed books={books} bookIds={recentIds} onClick={openBook}/>
-        )}
-
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"18px" }}>
-          <h2 style={{ fontFamily:"'Sora',sans-serif", fontWeight:700, fontSize:"13px", color:"rgba(255,255,255,0.38)", letterSpacing:"0.07em" }}>
-            {loading ? "LOADING…" : `${filtered.length} BOOK${filtered.length!==1?"S":""}`}
-            {searchQuery && !loading && <span style={{ fontWeight:400, color:"rgba(255,255,255,0.25)" }}> for "{searchQuery}"</span>}
-          </h2>
-        </div>
-
-        {apiError && (
-          <div style={{ background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.22)", borderRadius:"12px", padding:"16px 20px", marginBottom:"20px", color:"#fca5a5", fontSize:"14px" }}>
-            Could not connect to the API: {apiError}. Make sure <code>python api.py</code> is running on port 5000.
-          </div>
-        )}
-
-        {/* Grid */}
-        {loading ? (
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))", gap:"20px" }}>
-            {Array.from({length:8}).map((_,i)=><SkeletonCard key={i}/>)}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div style={{ textAlign:"center", padding:"80px 20px", color:"rgba(255,255,255,0.3)" }}>
-            <div style={{ fontSize:"36px", marginBottom:"14px", opacity:0.3, fontFamily:"'Sora',sans-serif" }}>○</div>
-            <p style={{ fontSize:"16px", fontWeight:600, marginBottom:"8px" }}>No books found</p>
-            <p style={{ fontSize:"14px" }}>Try adjusting your search or clearing filters.</p>
-          </div>
-        ) : (
-          <div className="fade-up" style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))", gap:"20px" }}>
-            {filtered.map(b => (
-              <BookCard key={b.id||b.title} book={b} onClick={openBook} onAuthorClick={openAuthor} onGenreClick={handleGenreClick}/>
-            ))}
-          </div>
-        )}
-
-        {/* On-demand */}
-        {!loading && (
-          <div style={{ marginTop:"52px", background:"rgba(255,255,255,0.04)", border:"1px solid rgba(199,125,255,0.12)", borderRadius:"20px", padding:"28px" }}>
-            <h3 style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"16px", color:"#f0e6ff", marginBottom:"5px" }}>Book not listed?</h3>
-            <p style={{ fontSize:"13px", color:"rgba(255,255,255,0.4)", marginBottom:"18px" }}>Request an on-demand score. Analysis takes around 30 seconds.</p>
-            <form onSubmit={handleOnDemand} style={{ display:"flex", gap:"10px", flexWrap:"wrap" }}>
-              <input value={onDemandTitle} onChange={e=>setOnDemandTitle(e.target.value)} placeholder="Book title"
-                style={{ flex:"1", minWidth:"150px", padding:"11px 16px", borderRadius:"12px", border:"1.5px solid rgba(255,255,255,0.1)", background:"rgba(255,255,255,0.07)", color:"#fff", fontSize:"14px" }}/>
-              <input value={onDemandAuthor} onChange={e=>setOnDemandAuthor(e.target.value)} placeholder="Author name"
-                style={{ flex:"1", minWidth:"150px", padding:"11px 16px", borderRadius:"12px", border:"1.5px solid rgba(255,255,255,0.1)", background:"rgba(255,255,255,0.07)", color:"#fff", fontSize:"14px" }}/>
-              <button type="submit" disabled={!!onDemandProgress} style={{ padding:"11px 22px", borderRadius:"12px", background: onDemandProgress?"rgba(255,255,255,0.07)":`linear-gradient(135deg,${C.pink},${C.purple})`, color: onDemandProgress?"rgba(255,255,255,0.35)":"#fff", fontSize:"13px", fontWeight:700, fontFamily:"'Sora',sans-serif", boxShadow: onDemandProgress?"none":"0 4px 16px rgba(199,125,255,0.35)", border:"none", cursor:onDemandProgress?"wait":"pointer", transition:"all 0.2s ease" }}>
-                {onDemandProgress || "Score It"}
-              </button>
-            </form>
-            {onDemandError && <p style={{ marginTop:"10px", fontSize:"12px", color:"#fca5a5" }}>{onDemandError}</p>}
-          </div>
-        )}
-
-        {/* Footer */}
-        <footer style={{ marginTop:"48px", paddingTop:"24px", paddingBottom:"32px", borderTop:"1px solid rgba(255,255,255,0.06)", textAlign:"center", display:"flex", gap:"20px", justifyContent:"center", flexWrap:"wrap" }}>
-          <button onClick={()=>setShowLegend(true)} style={{ fontSize:"13px", color:"rgba(255,255,255,0.28)", background:"none", border:"none", cursor:"pointer", fontFamily:"'Nunito',sans-serif" }}>Glossary of terms</button>
-          <span style={{ fontSize:"13px", color:"rgba(255,255,255,0.15)" }}>·</span>
-          <span style={{ fontSize:"13px", color:"rgba(255,255,255,0.28)", fontFamily:"'Nunito',sans-serif" }}>Scores reflect writing craft only</span>
-        </footer>
-      </div>
-
-      {showLegend && <QualityLegend onClose={()=>setShowLegend(false)}/>}
-    </div>
+      {selected && (
+        <BookModal
+          book={selected}
+          onClose={() => setSelected(null)}
+          onRequest={handleRequestScore}
+        />
+      )}
+    </>
   );
 }

@@ -2,9 +2,39 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    
+    <!-- Viewport: lock scale for true mobile-app feel -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
+    <!-- PWA / Theme -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#C77DFF">
+    
+    <!-- iOS PWA support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="StyleScope">
+    
+    <!-- Fonts (preconnect for performance) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Nunito:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Base styles to prevent flash of unstyled content -->
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #0a0118;
+        color: #ffffff;
+        height: 100%;
+        overscroll-behavior: none;
+      }
+      #root { height: 100%; }
+    </style>
+    
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>stylescope</title>
+    <title>StyleScope - Romance Book Quality Scores</title>
   </head>
   <body>
     <div id="root"></div>
