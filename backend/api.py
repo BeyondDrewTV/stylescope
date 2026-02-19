@@ -236,6 +236,19 @@ def init_db():
         )
     """)
 
+    # -- User preferences (Want/Avoid system for premium) -------------------
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id INTEGER NOT NULL,
+            category_type TEXT NOT NULL,
+            category_value TEXT NOT NULL,
+            preference TEXT NOT NULL CHECK(preference IN ('want', 'avoid')),
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, category_type, category_value),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -441,29 +454,80 @@ def _fuzzy_score(needle, haystack):
 # ---------------------------------------------------------------------------
 
 def _deserialize_book(row):
-    """Safe deserialize with fallback for missing columns"""
-    def _get(idx, default=None):
+    """Convert a sqlite3.Row dict into a clean API-friendly dict."""
+    def _get(key, default=None):
         try:
-            return row[idx] if idx < len(row) else default
-        except:
+            val = row.get(key) if isinstance(row, dict) else row[key]
+            return val if val is not None else default
+        except (KeyError, IndexError, TypeError):
             return default
-    
+
+    # Parse JSON fields stored as strings
+    def _parse_json(key, default=None):
+        val = _get(key)
+        if val is None:
+            return default
+        if isinstance(val, (list, dict)):
+            return val
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            return default
+
     return {
-        "id": _get(0),
-        "title": _get(1),
-        "author": _get(2),
-        "series": _get(3),
-        "isbn": _get(4),
-        "qualityScore": _get(5),
-        "spiceLevel": _get(6),
-        "spiceLabel": _get(7),        # NEW
-        "spiceSubtitle": _get(8),     # NEW
-        "spiceDescription": _get(9),  # NEW
-        "technicalQuality": _get(10),
-        "proseStyle": _get(11),
-        "pacing": _get(12),
-        "readability": _get(13),
-        "craftExecution": _get(14)
+        "id": _get("id"),
+        "title": _get("title"),
+        "author": _get("author"),
+        "genres": _get("genres"),
+        "publishedYear": _get("publishedYear"),
+        "isIndie": bool(_get("isIndie", 0)),
+        "isbn": _get("isbn"),
+        "isbn13": _get("isbn13"),
+
+        "qualityScore": _get("qualityScore", 0),
+        "technicalQuality": _get("technicalQuality", 0),
+        "proseStyle": _get("proseStyle", 0),
+        "pacing": _get("pacing", 0),
+        "readability": _get("readability", 0),
+        "craftExecution": _get("craftExecution", 0),
+        "confidenceLevel": _get("confidenceLevel"),
+
+        "technicalQualityNote": _get("technicalQualityNote"),
+        "proseStyleNote": _get("proseStyleNote"),
+        "pacingNote": _get("pacingNote"),
+        "readabilityNote": _get("readabilityNote"),
+        "craftExecutionNote": _get("craftExecutionNote"),
+
+        "spiceLevel": _get("spiceLevel", 0),
+        "spiceDescription": _get("spiceDescription"),
+        "contentWarnings": _parse_json("contentWarnings", []),
+
+        "synopsis": _get("synopsis"),
+        "rating": _get("rating"),
+        "readers": _get("readers", 0),
+        "themes": _parse_json("themes", []),
+        "moods": _parse_json("moods", []),
+        "endingType": _get("endingType"),
+        "coverUrl": _get("coverUrl"),
+
+        "seriesName": _get("seriesName"),
+        "seriesNumber": _get("seriesNumber"),
+        "seriesTotal": _get("seriesTotal"),
+        "seriesIsComplete": bool(_get("seriesIsComplete", 0)),
+
+        "scoredDate": _get("scoredDate"),
+        "goodreadsUrl": _get("goodreadsUrl"),
+
+        # Computed convenience fields
+        "series": _get("seriesName"),
+        "genre": _get("genres"),
+        "dimensions": [
+            {"name": "Readability",      "score": round((_get("readability", 0) or 0) / 10, 1)},
+            {"name": "Technical Quality", "score": round((_get("technicalQuality", 0) or 0) / 10, 1)},
+            {"name": "Prose Style",      "score": round((_get("proseStyle", 0) or 0) / 10, 1)},
+            {"name": "Pacing",           "score": round((_get("pacing", 0) or 0) / 10, 1)},
+            {"name": "Craft Execution",  "score": round((_get("craftExecution", 0) or 0) / 10, 1)},
+        ],
     }
 
 # ---------------------------------------------------------------------------
@@ -549,15 +613,29 @@ def search_books():
 
 @app.route("/api/books/<int:book_id>", methods=["GET"])
 def get_book(book_id):
+    user_id = request.headers.get("X-User-ID")
+    premium = is_premium(int(user_id)) if user_id and user_id.isdigit() else False
+
     conn = get_conn()
     c = conn.cursor()
     c.execute("SELECT * FROM books WHERE id = ?", (book_id,))
     row = c.fetchone()
     conn.close()
 
-    if row:
-        return jsonify(_deserialize_book(dict(row)))
-    return jsonify({"error": "Book not found"}), 404
+    if not row:
+        return jsonify({"error": "Book not found"}), 404
+
+    book = _deserialize_book(dict(row))
+
+    if not premium:
+        book["synopsis"] = None
+        book["contentWarnings"] = []
+        book["isPremiumLocked"] = True
+        book["upgradeMessage"] = "Upgrade to Premium to see full details"
+    else:
+        book["isPremiumLocked"] = False
+
+    return jsonify(book)
 
 
 # ========== SERIES TRACKING ==========
@@ -1208,6 +1286,174 @@ def pepper_message():
     animation = ANIMATION_MAP.get(context, "neutral")
 
     return jsonify({"message": message, "animation": animation})
+
+
+# ---------------------------------------------------------------------------
+# Premium helpers
+# ---------------------------------------------------------------------------
+
+def is_premium(user_id):
+    """Check if user has active premium subscription."""
+    if not user_id:
+        return False
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT subscription_status FROM users WHERE id = ?", (user_id,))
+    user = c.fetchone()
+    conn.close()
+    return user is not None and user["subscription_status"] == "active"
+
+
+# ---------------------------------------------------------------------------
+# Home sections
+# ---------------------------------------------------------------------------
+
+@app.route("/api/books/home-sections", methods=["GET"])
+def get_home_sections():
+    """Return curated sections for the home page."""
+    conn = get_conn()
+    c = conn.cursor()
+
+    # Recently scored (newest first)
+    c.execute("""
+        SELECT * FROM books
+        WHERE qualityScore IS NOT NULL AND qualityScore > 0
+        ORDER BY scoredDate DESC
+        LIMIT 12
+    """)
+    recently_scored = [_deserialize_book(dict(row)) for row in c.fetchall()]
+
+    # Highest rated
+    c.execute("""
+        SELECT * FROM books
+        WHERE qualityScore IS NOT NULL AND qualityScore > 0
+        ORDER BY qualityScore DESC
+        LIMIT 12
+    """)
+    highest_rated = [_deserialize_book(dict(row)) for row in c.fetchall()]
+
+    # Random picks
+    c.execute("""
+        SELECT * FROM books
+        WHERE qualityScore IS NOT NULL AND qualityScore > 0
+        ORDER BY RANDOM()
+        LIMIT 12
+    """)
+    random_picks = [_deserialize_book(dict(row)) for row in c.fetchall()]
+
+    conn.close()
+    return jsonify({
+        "recentlyScored": recently_scored,
+        "highestRated": highest_rated,
+        "randomPicks": random_picks,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Hidden gems
+# ---------------------------------------------------------------------------
+
+@app.route("/api/hidden-gems/daily", methods=["GET"])
+def get_daily_hidden_gems():
+    """
+    Return 9 under-discovered high-quality books.
+    Algorithm: qualityScore >= 75 AND readers < 1000
+    Rotates daily based on date seed.
+    """
+    conn = get_conn()
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT * FROM books
+        WHERE qualityScore >= 75 AND (readers IS NULL OR readers < 1000)
+        ORDER BY qualityScore DESC
+        LIMIT 50
+    """)
+    eligible = [_deserialize_book(dict(row)) for row in c.fetchall()]
+    conn.close()
+
+    if len(eligible) < 9:
+        # Not enough qualifying books — return what we have
+        gems = eligible
+    else:
+        today = datetime.now().strftime("%Y-%m-%d")
+        random.seed(today)
+        gems = random.sample(eligible, 9)
+
+    return jsonify({"gems": gems, "date": datetime.now().strftime("%Y-%m-%d")})
+
+
+# ---------------------------------------------------------------------------
+# Content warnings
+# ---------------------------------------------------------------------------
+
+@app.route("/api/content-warnings/categories", methods=["GET"])
+def get_warning_categories():
+    """Return all content warning categories with definitions."""
+    return jsonify({
+        "categories": [
+            {"id": "dubious_consent",  "label": "Dubious Consent",    "definition": "Consent issues or unclear consent"},
+            {"id": "sexual_violence",  "label": "Sexual Violence",    "definition": "Non-consensual sexual content"},
+            {"id": "graphic_violence", "label": "Graphic Violence",   "definition": "Detailed violent scenes"},
+            {"id": "stalking",         "label": "Stalking",           "definition": "Obsessive following or monitoring"},
+            {"id": "age_gap",          "label": "Age Gap",            "definition": "Significant age difference (10+ years)"},
+            {"id": "mental_health",    "label": "Mental Health",      "definition": "Depression, anxiety, PTSD"},
+            {"id": "suicide",          "label": "Suicide/Self-Harm",  "definition": "Suicide ideation or self-harm"},
+            {"id": "cheating",         "label": "Cheating/Infidelity","definition": "Infidelity by main characters"},
+            {"id": "death",            "label": "Death of Loved One", "definition": "Loss of family member or partner"},
+            {"id": "substance_abuse",  "label": "Substance Abuse",    "definition": "Drug or alcohol abuse"},
+        ]
+    })
+
+
+# ---------------------------------------------------------------------------
+# User preferences (Premium)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/user/<int:user_id>/preferences", methods=["GET"])
+def get_preferences(user_id):
+    """Get all user preferences (PREMIUM ONLY)."""
+    if not is_premium(user_id):
+        return jsonify({"error": "Premium feature"}), 403
+
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
+    rows = c.fetchall()
+    conn.close()
+
+    prefs = {}
+    for row in rows:
+        cat_type = row["category_type"]
+        if cat_type not in prefs:
+            prefs[cat_type] = {}
+        prefs[cat_type][row["category_value"]] = row["preference"]
+
+    return jsonify(prefs)
+
+
+@app.route("/api/user/<int:user_id>/preferences", methods=["PUT"])
+def update_preferences(user_id):
+    """Bulk update preferences (PREMIUM ONLY)."""
+    if not is_premium(user_id):
+        return jsonify({"error": "Premium feature"}), 403
+
+    data = request.get_json(force=True)
+
+    conn = get_conn()
+    c = conn.cursor()
+
+    for cat_type, values in data.items():
+        for cat_value, preference in values.items():
+            c.execute("""
+                INSERT OR REPLACE INTO user_preferences
+                (user_id, category_type, category_value, preference, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, cat_type, cat_value, preference, datetime.now().isoformat()))
+
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Preferences updated"})
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { UpgradeModal } from "./components/UpgradeModal";
+import { HiddenGemsExplorer } from "./components/HiddenGemsExplorer";
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -484,7 +486,7 @@ function SectionRow({ title, icon: SectionIcon, iconColor, books, loading, onSel
 }
 
 // ─── Home Tab ─────────────────────────────────────────────────────────────────
-function HomeTab({ onSelect, onRequest, onGoSearch }) {
+function HomeTab({ onSelect, onRequest, onGoSearch, onUpgradeNeeded, userPremium }) {
   const [sections, setSections] = useState({ recentlyScored: [], highestRated: [], randomPicks: [] });
   const [loading, setLoading] = useState(true);
 
@@ -601,6 +603,29 @@ function HomeTab({ onSelect, onRequest, onGoSearch }) {
             loading={loading}
             onSelect={onSelect}
           />
+
+          {/* Hidden Gems Discovery */}
+          <div style={{ padding: '0 16px', marginBottom: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <span style={{ fontSize: 18 }}>{'\uD83D\uDC8E'}</span>
+              <h2 style={{
+                fontFamily: "'Sora',sans-serif", fontSize: 16, fontWeight: 700, color: C.text,
+              }}>Hidden Gems</h2>
+              {!userPremium && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700,
+                  background: 'rgba(199,125,255,0.15)',
+                  color: C.purple, padding: '2px 8px',
+                  borderRadius: 10, fontFamily: "'Nunito',sans-serif",
+                }}>PREMIUM</span>
+              )}
+            </div>
+            <HiddenGemsExplorer
+              userPremium={userPremium}
+              onBookFound={(gem) => onSelect(gem)}
+              onUpgradeNeeded={onUpgradeNeeded}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -822,7 +847,7 @@ function SearchTab({ onSelect, onRequest }) {
       {!searching && results.length > 0 && (
         <div className="books-grid" style={{ paddingTop: 0 }}>
           {results.map((book, i) => (
-            <BookCard key={book.id} book={book} onSelect={() => {}} onRequest={onRequest} index={i}/>
+            <BookCard key={book.id} book={book} onSelect={onSelect} onRequest={onRequest} index={i}/>
           ))}
         </div>
       )}
@@ -1029,8 +1054,23 @@ function BottomNav({ active, onTab }) {
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [tab, setTab]           = useState('home');
-  const [selected, setSelected] = useState(null);
+  const [tab, setTab]               = useState('home');
+  const [selected, setSelected]     = useState(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [upgradeFeature, setUpgradeFeature] = useState('Premium Features');
+
+  // Simple premium check — in production this would come from auth state
+  const [userPremium] = useState(() => {
+    try {
+      const user = JSON.parse(localStorage.getItem('ss_user') || '{}');
+      return user.subscription_status === 'active';
+    } catch { return false; }
+  });
+
+  const handleUpgradeNeeded = (feature) => {
+    setUpgradeFeature(feature || 'Premium Features');
+    setShowUpgrade(true);
+  };
 
   const handleRequestScore = async (book) => {
     try {
@@ -1058,6 +1098,8 @@ export default function App() {
           onSelect={setSelected}
           onRequest={handleRequestScore}
           onGoSearch={() => setTab('search')}
+          userPremium={userPremium}
+          onUpgradeNeeded={() => handleUpgradeNeeded('Hidden Gems')}
         />
       )}
       {tab === 'search' && (
@@ -1088,6 +1130,13 @@ export default function App() {
           book={selected}
           onClose={() => setSelected(null)}
           onRequest={handleRequestScore}
+        />
+      )}
+
+      {showUpgrade && (
+        <UpgradeModal
+          feature={upgradeFeature}
+          onClose={() => setShowUpgrade(false)}
         />
       )}
     </>
