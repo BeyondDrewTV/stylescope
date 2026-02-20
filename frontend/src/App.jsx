@@ -1,5 +1,6 @@
 // src/App.jsx
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { ScoreThisBookDev } from './ScoreThisBookDev';
 
 // ────────────────────────────────────────────────────────────────────────────────
 // ─── GLOBAL CSS ─────────────────────────────────────────────────────────────────
@@ -1302,6 +1303,8 @@ export default function App() {
       </div>
 
       <BackToTop visible={scrollY > 600}/>
+
+      <ScoreThisBookDev />
 
       <div style={{display:window.innerWidth <= 768 ? 'block' : 'none'}}>
         <MobileNav activeTab={mobileTab} setActiveTab={setMobileTab} onSettings={() => setShowSettings(true)}/>

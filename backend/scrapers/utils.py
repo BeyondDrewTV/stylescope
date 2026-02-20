@@ -1,6 +1,6 @@
 """Shared scraping utilities."""
 import re
-from backend.config import QUALITY_KEYWORDS
+from config import QUALITY_KEYWORDS
 
 
 def extract_quality_sentences(text: str, max_sentences: int = 8) -> list[str]:

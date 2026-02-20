@@ -14,7 +14,7 @@ All routes:
     POST /api/series/<name>/notify
     GET  /api/spice-levels
     POST /api/score-on-demand
-    GET  /api/job-status/<id>
+    GET  /api/score-on-demand/<job_id>
     POST /api/auth/magic-link
     GET  /api/auth/verify
     POST /api/stripe/checkout
@@ -40,6 +40,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timedelta
+from typing import Any
 
 import stripe
 from flask import Flask, jsonify, request
@@ -56,11 +57,20 @@ from backend.quizzes import (
     PERSONALITY_QUESTIONS,
     score_personality,
 )
+from backend.gamification import gamification_bp, init_gamification_db
+from backend.book_context import fetch_book_context
+from backend.jobs import (
+    create_on_demand_job,
+    get_on_demand_job,
+    update_on_demand_job_status,
+)
+
 
 app = Flask(__name__)
 CORS(app)
+app.register_blueprint(gamification_bp)
 
-# ---------------------------------------------------------------------------
+# ------------
 # Configuration
 # ---------------------------------------------------------------------------
 app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
@@ -160,6 +170,7 @@ def init_db():
         ("seriesTotal",      "INTEGER"),
         ("seriesIsComplete", "INTEGER DEFAULT 0"),
         ("search_normalized", "TEXT"),
+        ("officialContentWarnings", "TEXT"),
     ]:
         try:
             c.execute(f"ALTER TABLE books ADD COLUMN {col} {definition}")
@@ -246,6 +257,22 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (user_id, category_type, category_value),
             FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    # -- On-demand scoring jobs ----------------------------------------------
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS on_demand_jobs (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            isbn TEXT,
+            title TEXT NOT NULL,
+            author TEXT NOT NULL,
+            user_id TEXT,
+            result_json TEXT,
+            error_message TEXT
         )
     """)
 
@@ -469,9 +496,36 @@ def _deserialize_book(row):
             return default
         if isinstance(val, (list, dict)):
             return val
+        # Be resilient against malformed JSON (bad unicode/backslash escapes)
+        if not isinstance(val, str):
+            return default
+
         try:
             return json.loads(val)
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError:
+            # Try a few common sanitizations before giving up
+            try:
+                # Fix lone backslashes by escaping them
+                fixed = val.replace('\\', '\\\\')
+                return json.loads(fixed)
+            except Exception:
+                pass
+
+            try:
+                # Decode unicode-escape sequences then parse
+                decoded = val.encode('utf-8').decode('unicode_escape')
+                return json.loads(decoded)
+            except Exception:
+                pass
+
+            try:
+                # Escape incomplete \u escapes (not followed by 4 hex digits)
+                import re
+                fixed2 = re.sub(r'\\u(?![0-9a-fA-F]{4})', r'\\\\u', val)
+                return json.loads(fixed2)
+            except Exception:
+                return default
+        except TypeError:
             return default
 
     return {
@@ -528,7 +582,9 @@ def _deserialize_book(row):
             {"name": "Pacing",           "score": round((_get("pacing", 0) or 0) / 10, 1)},
             {"name": "Craft Execution",  "score": round((_get("craftExecution", 0) or 0) / 10, 1)},
         ],
+        "officialContentWarnings": _parse_json("officialContentWarnings", None),
     }
+
 
 # ---------------------------------------------------------------------------
 # Book endpoints
@@ -629,6 +685,7 @@ def get_book(book_id):
 
     if not premium:
         book["synopsis"] = None
+        # Keep official warnings visible to all users, but hide inferred/community warnings for non-premium.
         book["contentWarnings"] = []
         book["isPremiumLocked"] = True
         book["upgradeMessage"] = "Upgrade to Premium to see full details"
@@ -679,6 +736,68 @@ def get_series_info(book_id):
         "nextExpectedDate": None,  # Not tracked yet - placeholder for future
         "books": series_books,
     })
+
+
+# ------------------------- Official warnings admin -----------------------
+def getOfficialWarningsForBook(book_id: int):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT officialContentWarnings FROM books WHERE id = ?", (book_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    val = row[0]
+    if not val:
+        return None
+    try:
+        return json.loads(val)
+    except Exception:
+        return None
+
+
+@app.route("/api/books/<int:book_id>/official-warnings", methods=["POST"])
+def set_official_warnings(book_id):
+    """
+    Set or update officialContentWarnings for a book.
+    Body must be JSON with keys: source (one of publisher|author|book_trigger_warnings_api|manual), warnings (list), optional rawText.
+    """
+    # Admin-only: require matching ADMIN_API_KEY header
+    admin_key = os.getenv("ADMIN_API_KEY")
+    provided = request.headers.get("X-Admin-Key") or request.args.get("admin_key")
+    if not admin_key or provided != admin_key:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payload = request.get_json(force=True, silent=True)
+    if not payload:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    source = payload.get("source")
+    warnings = payload.get("warnings")
+    raw_text = payload.get("rawText")
+
+    if source not in ("publisher", "author", "book_trigger_warnings_api", "manual"):
+        return jsonify({"error": "Invalid source"}), 400
+    if not isinstance(warnings, list):
+        return jsonify({"error": "warnings must be a list"}), 400
+
+    doc = {
+        "source": source,
+        "warnings": warnings,
+    }
+    if raw_text:
+        doc["rawText"] = raw_text
+
+    try:
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute("UPDATE books SET officialContentWarnings = ? WHERE id = ?", (json.dumps(doc), book_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "ok", "officialContentWarnings": doc})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 
 @app.route("/api/series/<series_name>/notify", methods=["POST"])
@@ -773,106 +892,155 @@ def get_spice_levels():
 # On-demand scoring
 # ---------------------------------------------------------------------------
 
-scoring_jobs: dict = {}
-_jobs_lock = threading.Lock()
 
-
-def _score_book_async(job_id: str, title: str, author: str):
-    def update(progress=None, status=None, **kwargs):
-        with _jobs_lock:
-            if progress:
-                scoring_jobs[job_id]["progress"] = progress
-            if status:
-                scoring_jobs[job_id]["status"] = status
-            scoring_jobs[job_id].update(kwargs)
-
+def _run_scoring_job(
+    job_id: str,
+    isbn: str | None,
+    title: str,
+    author: str,
+    user_id: str | None,
+):
+    """Background worker for scoring a book on-demand."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
-        update(progress="Scraping Goodreads reviews…")
-        reviews = goodreads.scrape(title, author)
+        update_on_demand_job_status(job_id, "running")
+        logger.info(f"[JOB {job_id}] Starting scoring: title='{title}', author='{author}', isbn={isbn}")
 
-        if not reviews:
-            update(status="failed", error="No reviews found on Goodreads for this book.")
+        # 1) Build context via existing hybrid pipeline
+        logger.info(f"[JOB {job_id}] Calling fetch_book_context()...")
+        ctx = fetch_book_context(isbn=isbn, title=title, author=author)
+        context_text: str = ctx.get("context_text", "") or ""
+        meta = ctx.get("meta", {}) or {}
+        review_count = ctx.get("review_count", 0)  # FIX: was looking in meta for review_count_estimate
+        excerpt_count = ctx.get("excerpt_count", 0)
+
+        logger.info(
+            f"[JOB {job_id}] Context fetched: source={meta.get('source')}, "
+            f"context_text_length={len(context_text)}, "
+            f"review_count={review_count}, excerpt_count={excerpt_count}, "
+            f"description_length={meta.get('description_length')}"
+        )
+        logger.debug(f"[JOB {job_id}] Context text preview: {context_text[:300]}...")
+
+        if not context_text.strip():
+            error_msg = "No context available from data sources"
+            logger.warning(f"[JOB {job_id}] {error_msg}")
+            update_on_demand_job_status(job_id, "failed", error_message=error_msg)
             return
 
-        update(progress=f"Scoring {len(reviews)} reviews with Gemini…")
-        scores = scorer.score_book(title, author, reviews)
+        # 2) Score with existing scorer
+        series = ""  # optional: derive from title if desired
+        genre = "Romance"
+        subgenre = ""
 
-        conn = get_conn()
-        c = conn.cursor()
-        c.execute("""
-            INSERT OR REPLACE INTO books
-                (title, author, qualityScore, technicalQuality, proseStyle,
-                 pacing, readability, craftExecution, confidenceLevel,
-                 voteCount, scoredDate)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            title, author,
-            scores["overall"],
-            scores["grammar"],
-            scores["prose"],
-            scores["pacing"],
-            scores["readability"],
-            scores["polish"],
-            scores.get("confidence", "medium"),
-            len(reviews),
-            datetime.now().isoformat(),
-        ))
-        book_id = c.lastrowid
-        conn.commit()
+        logger.info(f"[JOB {job_id}] Calling scorer.score_book() with review_count={review_count}")
+        scores = scorer.score_book(
+            title=title,
+            author=author,
+            series=series,
+            genre=genre,
+            subgenre=subgenre,
+            context_text=context_text,
+            review_count=review_count,
+        )
 
-        c.execute("SELECT * FROM books WHERE id = ?", (book_id,))
-        book = _deserialize_book(dict(c.fetchone()))
-        conn.close()
+        if scores.get("scoring_status") == "error":
+            error_msg = (scores.get("flags") or ["Unknown error"])[0]
+            logger.error(f"[JOB {job_id}] Scoring failed (error): {error_msg}")
+            update_on_demand_job_status(job_id, "failed", error_message=error_msg)
+            return
+        
+        if scores.get("scoring_status") == "temporarily_unavailable":
+            error_msg = "Scoring is temporarily busy, please try again in a few minutes."
+            logger.warning(f"[JOB {job_id}] Scoring failed (rate limited): OpenRouter 429")
+            update_on_demand_job_status(job_id, "failed", error_message=error_msg)
+            return
 
-        update(status="complete", progress="Done!", book=book)
+        logger.info(f"[JOB {job_id}] Scoring successful: score={scores.get('overall_score')}, confidence={scores.get('confidence')}%")
+        # 3) Persist result into job
+        update_on_demand_job_status(job_id, "completed", result=scores)
 
     except Exception as e:
-        update(status="failed", error=str(e))
+        logger.exception(f"[JOB {job_id}] Exception in _run_scoring_job")
+        update_on_demand_job_status(job_id, "failed", error_message=str(e))
 
 
 @app.route("/api/score-on-demand", methods=["POST"])
 def score_on_demand():
-    data = request.get_json(force=True)
-    title = (data.get("title") or "").strip()
-    author = (data.get("author") or "").strip()
+    """
+    Start an on-demand scoring job.
 
-    if not title or not author:
-        return jsonify({"error": "Both 'title' and 'author' are required."}), 400
-
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT * FROM books WHERE title = ? AND author = ?", (title, author))
-    existing = c.fetchone()
-    conn.close()
-
-    if existing:
-        return jsonify({"status": "exists", "book": _deserialize_book(dict(existing))})
-
-    job_id = str(uuid.uuid4())
-    with _jobs_lock:
-        scoring_jobs[job_id] = {
-            "status": "processing",
-            "progress": "Starting…",
-            "created_at": time.time(),
+    Request body:
+        {
+            "title": "Book Title",
+            "author": "Author Name",
+            "isbn": "optional"
         }
 
-    thread = threading.Thread(
-        target=_score_book_async,
-        args=(job_id, title, author),
+    Response (202 Accepted):
+        { "job_id": "uuid-string" }
+    """
+    data = request.get_json(force=True) or {}
+
+    title = (data.get("title") or "").strip()
+    author = (data.get("author") or "").strip()
+    isbn = (data.get("isbn") or None) or None
+    user_id = data.get("user_id")  # optional
+
+    if not title or not author:
+        return jsonify({"error": "title and author are required"}), 400
+
+    job_id = create_on_demand_job(title=title, author=author, isbn=isbn, user_id=user_id)
+
+    # Start background thread
+    t = threading.Thread(
+        target=_run_scoring_job,
+        args=(job_id, isbn, title, author, user_id),
         daemon=True,
     )
-    thread.start()
+    t.start()
 
-    return jsonify({"job_id": job_id, "estimated_seconds": 30})
+    # 202 Accepted since work is async
+    return jsonify({"job_id": job_id}), 202
 
 
-@app.route("/api/job-status/<job_id>", methods=["GET"])
-def job_status(job_id):
-    with _jobs_lock:
-        job = scoring_jobs.get(job_id)
+@app.route("/api/score-on-demand/<job_id>", methods=["GET"])
+def get_score_on_demand(job_id: str):
+    """
+    Poll the status of an on-demand scoring job.
+
+    Response:
+        {
+            "job_id": "uuid",
+            "status": "queued|running|completed|failed",
+            "result": { ... scoring result ... },  # if completed
+            "error_message": "..."  # if failed
+        }
+    """
+    job = get_on_demand_job(job_id)
     if not job:
-        return jsonify({"error": "Job not found"}), 404
-    return jsonify(job)
+        return jsonify({"error": "job not found"}), 404
+
+    status = job["status"]
+    resp: dict[str, Any] = {
+        "job_id": job["id"],
+        "status": status,
+    }
+
+    if status == "completed":
+        # result_json is a JSON string; parse to dict
+        result_json = job["result_json"]
+        try:
+            resp["result"] = json.loads(result_json) if result_json else None
+        except Exception:
+            resp["result"] = None
+            resp["error_message"] = "Failed to parse result JSON"
+    elif status == "failed":
+        resp["error_message"] = job["error_message"]
+
+    return jsonify(resp), 200
 
 
 # ---------------------------------------------------------------------------
@@ -1476,6 +1644,7 @@ def health():
 
 init_db()
 migrate_csv_to_db()
+init_gamification_db()
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000, host="0.0.0.0")

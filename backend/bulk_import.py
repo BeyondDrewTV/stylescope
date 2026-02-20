@@ -21,8 +21,8 @@ import re
 import sys
 from datetime import datetime
 
-# Import existing helpers from backend.api
-from backend.api import get_conn, _safe_int
+# Import existing helpers from api
+from api import get_conn, _safe_int
 
 
 # ---------------------------------------------------------------------------

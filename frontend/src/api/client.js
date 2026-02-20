@@ -61,6 +61,13 @@ export const api = {
   getWarningCategories: () =>
     fetch(`${API_BASE}/content-warnings/categories`).then(handleResponse),
 
+  setOfficialWarnings: (bookId, doc) =>
+    fetch(`${API_BASE}/books/${bookId}/official-warnings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(doc),
+    }).then(handleResponse),
+
   // ── User Preferences (Premium) ──────────────────────────────────────────
   getPreferences: (userId) =>
     fetch(`${API_BASE}/user/${userId}/preferences`).then(handleResponse),
@@ -112,5 +119,30 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, plan }),
+    }).then(handleResponse),
+
+  // ── Gamification ─────────────────────────────────────────────────────
+  getGameSession: (uuid) =>
+    fetch(`${API_BASE}/game/session?uuid=${encodeURIComponent(uuid)}`).then(handleResponse),
+
+  sendGameEvent: (uuid, eventType, meta = {}) =>
+    fetch(`${API_BASE}/game/event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uuid, event_type: eventType, ...meta }),
+    }).then(handleResponse),
+
+  setActiveBiome: (uuid, biomeId) =>
+    fetch(`${API_BASE}/game/biome`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uuid, biome_id: biomeId }),
+    }).then(handleResponse),
+
+  linkGameAccount: (uuid, userId) =>
+    fetch(`${API_BASE}/game/link-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uuid, user_id: userId }),
     }).then(handleResponse),
 };

@@ -1,8 +1,11 @@
 """Configuration for StyleScope scorer."""
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env from project root (one level above backend/)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_env_path)
 
 # API Keys
 REDDIT_CLIENT_ID     = os.getenv("REDDIT_CLIENT_ID", "")

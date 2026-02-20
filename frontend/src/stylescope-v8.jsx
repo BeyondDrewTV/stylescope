@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { UpgradeModal } from "./components/UpgradeModal";
 import { HiddenGemsExplorer } from "./components/HiddenGemsExplorer";
+import { useGame, useGameActions } from "./context/GameContext";
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -35,7 +36,7 @@ const globalCSS = `
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body, #root {
-    height: 100%; background: ${C.bg}; color: ${C.text};
+    height: 100%; background: transparent; color: ${C.text};
     font-family: 'Nunito', sans-serif; -webkit-font-smoothing: antialiased;
     overscroll-behavior: none;
   }
@@ -633,7 +634,7 @@ function HomeTab({ onSelect, onRequest, onGoSearch, onUpgradeNeeded, userPremium
 }
 
 // ─── Search Tab ───────────────────────────────────────────────────────────────
-function SearchTab({ onSelect, onRequest }) {
+function SearchTab({ onSelect, onRequest, onSearchExecuted }) {
   const [query, setQuery]           = useState('');
   const [results, setResults]       = useState([]);
   const [searching, setSearching]   = useState(false);
@@ -663,9 +664,10 @@ function SearchTab({ onSelect, onRequest }) {
       const res = await fetch(`/api/books/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       setResults(Array.isArray(data) ? data : (data.books || []));
+      onSearchExecuted?.();
     } catch { setResults([]); }
     finally { setSearching(false); }
-  }, [recentSearches]);
+  }, [recentSearches, onSearchExecuted]);
 
   const handleChange = (e) => {
     const val = e.target.value;
@@ -848,6 +850,7 @@ function SearchTab({ onSelect, onRequest }) {
         <div className="books-grid" style={{ paddingTop: 0 }}>
           {results.map((book, i) => (
             <BookCard key={book.id} book={book} onSelect={onSelect} onRequest={onRequest} index={i}/>
+
           ))}
         </div>
       )}
@@ -967,14 +970,30 @@ function BookModal({ book, onClose, onRequest }) {
           </div>
         )}
 
-        {/* Content warnings */}
-        {book.contentWarnings && book.contentWarnings.length > 0 && (
+        {/* Content warnings — prefer official warnings when available, fallback to inferred/community warnings */}
+        {(book.officialContentWarnings && book.officialContentWarnings.warnings && book.officialContentWarnings.warnings.length > 0) ? (
+          <div style={{
+            background: 'rgba(244,163,64,0.07)', border: '1px solid rgba(244,163,64,0.18)',
+            borderRadius: 10, padding: '10px 14px',
+          }}>
+            <p style={{ fontSize: 11, color: C.warning || '#b45309', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
+              Content Warnings (official)
+            </p>
+            <p style={{ fontSize: 13, color: C.textMuted }}>{book.officialContentWarnings.warnings.join(' · ')}</p>
+            {book.officialContentWarnings.rawText && (
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ fontSize: 12, color: C.textMuted, cursor: 'pointer' }}>Full warning text</summary>
+                <p style={{ fontSize: 13, color: C.textMuted, marginTop: 6 }}>{book.officialContentWarnings.rawText}</p>
+              </details>
+            )}
+          </div>
+        ) : (book.contentWarnings && book.contentWarnings.length > 0) && (
           <div style={{
             background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.18)',
             borderRadius: 10, padding: '10px 14px',
           }}>
             <p style={{ fontSize: 11, color: C.danger, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>
-              Content Warnings
+              Content Warnings (inferred)
             </p>
             <p style={{ fontSize: 13, color: C.textMuted }}>{book.contentWarnings.join(' · ')}</p>
           </div>
@@ -1059,6 +1078,19 @@ export default function App() {
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeFeature, setUpgradeFeature] = useState('Premium Features');
 
+  // Game context
+  const { state: gameState } = useGame();
+  const { sendEvent } = useGameActions();
+
+  // Fire app_open event once on mount
+  const hasFiredOpen = useRef(false);
+  useEffect(() => {
+    if (!hasFiredOpen.current && !gameState.loading) {
+      hasFiredOpen.current = true;
+      sendEvent("app_open");
+    }
+  }, [gameState.loading, sendEvent]);
+
   // Simple premium check — in production this would come from auth state
   const [userPremium] = useState(() => {
     try {
@@ -1072,6 +1104,12 @@ export default function App() {
     setShowUpgrade(true);
   };
 
+  // Track book_viewed event when a book is selected
+  const handleSelect = useCallback((book) => {
+    setSelected(book);
+    sendEvent("book_viewed");
+  }, [sendEvent]);
+
   const handleRequestScore = async (book) => {
     try {
       const res = await fetch('/api/score-on-demand', {
@@ -1081,6 +1119,7 @@ export default function App() {
       });
       const data = await res.json();
       if (data.job_id) {
+        sendEvent("score_requested");
         alert('Scoring request submitted! Check back in ~30 seconds.');
       }
     } catch (err) {
@@ -1095,7 +1134,7 @@ export default function App() {
 
       {tab === 'home' && (
         <HomeTab
-          onSelect={setSelected}
+          onSelect={handleSelect}
           onRequest={handleRequestScore}
           onGoSearch={() => setTab('search')}
           userPremium={userPremium}
@@ -1104,8 +1143,9 @@ export default function App() {
       )}
       {tab === 'search' && (
         <SearchTab
-          onSelect={setSelected}
+          onSelect={handleSelect}
           onRequest={handleRequestScore}
+          onSearchExecuted={() => sendEvent("search")}
         />
       )}
       {tab === 'library' && (

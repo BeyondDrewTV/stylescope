@@ -1,3 +1,4 @@
+
 """
 Goodreads scraper using Apify API for robust review extraction.
 Uses requests for book search, then Apify for review scraping.
@@ -11,10 +12,13 @@ from typing import List, Optional
 import requests
 from bs4 import BeautifulSoup
 from apify_client import ApifyClient
+from pathlib import Path
 from dotenv import load_dotenv
 
 
-load_dotenv()
+# Load .env from project root (one level above backend/)
+_env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+load_dotenv(_env_path)
 
 
 logger = logging.getLogger(__name__)
@@ -305,19 +309,19 @@ def scrape_goodreads(
         
         # Step 2: Use Apify to scrape reviews
         all_reviews = _scrape_reviews_with_apify(book_id)
-        
+
         if not all_reviews:
             logger.warning("No reviews found via Apify")
             return []
-        
+
         # Step 3: Filter for quality-focused reviews
         quality_excerpts = _filter_quality_reviews(all_reviews)
-        
+
         logger.info(
             f"Found {len(quality_excerpts)} quality excerpts "
             f"(from {len(all_reviews)} total reviews)"
         )
-        
+
         return quality_excerpts
         
     except Exception as e:
@@ -347,47 +351,55 @@ def test_goodreads_connection() -> bool:
         return False
 
 
-def test_apify_integration() -> bool:
-    """Test if Apify API token is configured correctly."""
+def _scrape_reviews_with_apify(book_id: str) -> List[str]:
+    """Use Apify to scrape reviews for a given book ID."""
     try:
+        # Get Apify API token
         apify_token = os.getenv('APIFY_API_TOKEN')
         if not apify_token:
-            logger.error("✗ APIFY_API_TOKEN not found in environment")
-            return False
+            logger.error("APIFY_API_TOKEN not found in environment variables")
+            return []
         
+        # Initialize Apify client
         client = ApifyClient(apify_token)
-        # Just check if client initializes properly
-        logger.info("✓ Apify client initialized successfully")
-        return True
+        
+        # Configure scraping run
+        run_input = {
+            "startUrls": [f"https://www.goodreads.com/book/show/{book_id}"],
+            "includeReviews": True,
+            "endPage": 3,  # Only first 3 pages = ~30 reviews
+            "proxy": {"useApifyProxy": True}
+        }
+        
+        logger.info(f"Starting Apify scrape for book ID {book_id}...")
+        
+        # Run the Apify actor
+        run = client.actor("epctex/goodreads-scraper").call(run_input=run_input)
+        
+        # Wait a moment for results to be ready
+        time.sleep(2)
+        
+        # Extract reviews from results
+        reviews = []
+        logger.info("Fetching results from Apify...")
+        
+        for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+            if 'reviews' in item and item['reviews']:
+                for review in item['reviews']:
+                    if review.get('text'):
+                        # Clean up the review text
+                        text = review['text'].strip()
+                        text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
+                        
+                        if text:
+                            reviews.append(text)
+        
+        logger.info(f"Apify returned {len(reviews)} total reviews")
+        return reviews
         
     except Exception as e:
-        logger.error(f"✗ Apify initialization failed: {e}")
-        return False
+        logger.error(f"Apify scraping failed: {e}")
+        return []
 
 
-# For testing
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    
-    # Test connections
-    print("Testing Goodreads connection...")
-    goodreads_ok = test_goodreads_connection()
-    print(f"Goodreads reachable: {goodreads_ok}")
-    
-    print("\nTesting Apify integration...")
-    apify_ok = test_apify_integration()
-    print(f"Apify configured: {apify_ok}")
-    
-    # Test scraping if both are OK
-    if goodreads_ok and apify_ok:
-        print("\nTesting full scrape pipeline...")
-        excerpts = scrape_goodreads(
-            title="Twisted Love",
-            author="Ana Huang"
-        )
-        print(f"\nFound {len(excerpts)} quality excerpts")
-        
-        if excerpts:
-            print(f"\nSample excerpt:\n{excerpts[0][:300]}...")
-    else:
-        print("\n⚠ Cannot test scraping - connection or config issues")
+

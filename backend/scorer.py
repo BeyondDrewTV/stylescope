@@ -1,39 +1,48 @@
 """
 LLM scoring integration via OpenRouter.
-Sends aggregated review excerpts and returns structured quality scores.
+
+Takes an aggregated context text about the book (descriptions + review snippets)
+and returns structured quality scores.
 """
+
 import json
 import time
 import logging
 import re
 import random
 import requests
-from backend.config import GEMINI_RETRY_MAX, GEMINI_RETRY_DELAY
-from backend.scrapers.utils import format_review_block
+import os
 
+from dotenv import load_dotenv
+from backend.config import GEMINI_RETRY_MAX, GEMINI_RETRY_DELAY
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-
-# Get OpenRouter API key from environment
-import os
-from dotenv import load_dotenv
-load_dotenv()
+# OpenRouter configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = "openai/gpt-3.5-turbo"  # Faster, lighter model (less rate-limited than Llama 70B)
 
+# NOTE: This template now expects a generic "CONTEXT" block instead of
+# Goodreads-specific "Reviews" and is agnostic to source (Hardcover, Google, retailers).
+SCORING_PROMPT_TEMPLATE = """
+You are StyleScope's editorial AI, trained to evaluate romance and dark romance novels based on writing quality — NOT plot, characters, or enjoyment. You score books across 5 independent dimensions using a 0-100 scale.
 
-SCORING_PROMPT_TEMPLATE = """You are StyleScope's editorial AI, trained to evaluate romance and dark romance novels based on writing quality — NOT plot, characters, or enjoyment. You score books across 5 independent dimensions using a 0-100 scale.
+You will be given a block of CONTEXT about the book. This context may include:
+- Descriptions or blurbs.
+- Short review snippets from book communities (e.g., Hardcover) or retailers.
+- Other reader commentary.
 
+You must infer writing quality signals from this context. If context is thin or contradictory, lower your confidence score, but still make your best estimate.
 
 **CRITICAL: READABILITY is the PRIMARY dimension.** StyleScope exists because readers struggle with books that are confusing, clunky, or hard to follow.
 
-
 ## THE 5 SCORING DIMENSIONS
 
-
 ### 1. READABILITY (0-100) ⭐ PRIMARY DIMENSION ⭐
-**What to look for:** "easy to read", "flew through", "confusing", "hard to follow", "had to reread", "clunky", "smooth", "flowed perfectly"
 
+**What to look for:** "easy to read", "flew through", "confusing", "hard to follow", "had to reread", "clunky", "smooth", "flowed perfectly"
 
 **Scoring:**
 - 90-100: "Flowed perfectly", "disappeared into story", "writing was invisible"
@@ -43,35 +52,27 @@ SCORING_PROMPT_TEMPLATE = """You are StyleScope's editorial AI, trained to evalu
 - 50-59: "Hard to follow", "struggled to get through"
 - Below 50: "Couldn't finish due to writing"
 
-
 **CRITICAL SIGNALS:**
 - "Had to reread" = max 75
 - "Confusing" or "hard to follow" = 65 or below
 - "DNF'd because of writing" = 55 or below
 - "Flowed perfectly" = 85+
 
-
 ### 2. GRAMMAR (0-100)
-**What to look for:** "typos", "editing", "grammar errors", "well-edited", "flawless", "needed an editor"
-
+What to look for: "typos", "editing", "grammar errors", "well-edited", "flawless", "needed an editor"
 
 ### 3. POLISH (0-100)
-**What to look for:** "continuity errors", "plot holes", "inconsistent", "rushed", "well-crafted", "polished"
-
+What to look for: "continuity errors", "plot holes", "inconsistent", "rushed", "well-crafted", "polished"
 
 ### 4. PROSE STYLE (0-100)
-**What to look for:** "beautiful writing", "vivid", "flat", "basic", "cliché", "purple prose", "formulaic"
-
+What to look for: "beautiful writing", "vivid", "flat", "basic", "cliché", "purple prose", "formulaic"
 
 ### 5. PACING (0-100)
-**What to look for:** "couldn't put down", "page-turner", "dragged", "slow", "fast-paced"
-
+What to look for: "couldn't put down", "page-turner", "dragged", "slow", "fast-paced"
 
 ## WEIGHTED SCORING
 
-
 Overall = (Readability × 40%) + (Grammar × 15%) + (Polish × 15%) + (Prose × 15%) + (Pacing × 15%)
-
 
 **Critical Rules:**
 - If Readability < 70: Overall CANNOT exceed 75
@@ -79,12 +80,9 @@ Overall = (Readability × 40%) + (Grammar × 15%) + (Polish × 15%) + (Prose × 
 - Score dimensions independently — ignore plot/character opinions
 - Use the full 0-100 range
 
-
 ## OUTPUT FORMAT
 
-
 Return ONLY valid JSON with no markdown, no code fences, no commentary:
-
 
 {{
   "book_title": "{title}",
@@ -100,7 +98,7 @@ Return ONLY valid JSON with no markdown, no code fences, no commentary:
   "overall_calculation": "(78×0.4) + (72×0.15) + (70×0.15) + (68×0.15) + (75×0.15) = 74.1 → 74",
   "confidence": 78,
   "reasoning": {{
-    "readability": "Brief explanation citing specific review signals.",
+    "readability": "Brief explanation citing specific context signals.",
     "grammar": "Brief explanation.",
     "polish": "Brief explanation.",
     "prose": "Brief explanation.",
@@ -111,17 +109,16 @@ Return ONLY valid JSON with no markdown, no code fences, no commentary:
   "key_phrases": ["phrase 1", "phrase 2", "phrase 3"]
 }}
 
-
 ---
 
-
 Book: {title} by {author}
+
 Series: {series}
 Genre: {genre}
 
-
-Reviews:
-{reviews}"""
+CONTEXT:
+{context}
+"""
 
 
 def _calculate_overall(scores: dict) -> int:
@@ -134,53 +131,53 @@ def _calculate_overall(scores: dict) -> int:
     pr = scores.get("prose", 70)
     pa = scores.get("pacing", 70)
 
-
     raw = (r * 0.40) + (g * 0.15) + (p * 0.15) + (pr * 0.15) + (pa * 0.15)
     overall = round(raw)
-
 
     # Enforce readability cap
     if r < 70 and overall > 75:
         logger.info(f"Readability cap applied: {overall} → 75 (readability={r})")
         overall = 75
 
-
     return overall
 
 
 def _classify_error(error_msg: str) -> str:
     """Return specific error type for better debugging."""
+    if not error_msg:
+        return "unknown_error"
+
     error_lower = error_msg.lower()
+
     if "500" in error_msg or "internal server error" in error_lower:
         return "api_error_500"
-    elif "429" in error_msg or "rate limit" in error_lower:
+    if "429" in error_msg or "rate limit" in error_lower:
         return "api_error_rate_limit"
-    elif "json" in error_lower or "parse" in error_lower:
+    if "json" in error_lower or "parse" in error_lower:
         return "json_parse_failure"
-    elif "not found" in error_lower or "404" in error_msg:
+    if "not found" in error_lower or "404" in error_msg:
         return "book_not_found"
-    elif "no excerpts" in error_lower:
-        return "no_excerpts_found"
-    else:
-        return f"scoring_error: {error_msg}"
+    if "no context" in error_lower:
+        return "no_context_found"
+
+    return f"scoring_error: {error_msg}"
 
 
 def _parse_llm_response(text: str) -> dict | None:
     """Extract and parse JSON with multiple fallback strategies."""
-    
     # Strategy 1: Try parsing raw response
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    
+
     # Strategy 2: Strip markdown code fences
     cleaned = re.sub(r"```(?:json)?", "", text).strip()
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
-    
+
     # Strategy 3: Extract JSON object between first { and last }
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
@@ -188,7 +185,7 @@ def _parse_llm_response(text: str) -> dict | None:
             return json.loads(match.group())
         except json.JSONDecodeError as e:
             logger.warning(f"JSON parse error after all attempts: {e}")
-    
+
     # Strategy 4: Return fallback default score
     logger.warning("All JSON parsing strategies failed - returning low-confidence default")
     return {
@@ -199,14 +196,14 @@ def _parse_llm_response(text: str) -> dict | None:
             "grammar": 50,
             "polish": 50,
             "prose": 50,
-            "pacing": 50
+            "pacing": 50,
         },
         "overall_score": 50,
         "confidence": 0,
         "reasoning": {},
         "flags": ["json_parse_failure"],
         "review_count": 0,
-        "key_phrases": []
+        "key_phrases": [],
     }
 
 
@@ -216,32 +213,65 @@ def score_book(
     series: str,
     genre: str,
     subgenre: str,
-    excerpts: list[str],
+    context_text: str,
+    review_count: int = 0,
 ) -> dict:
     """
-    Send review excerpts to OpenRouter and return structured scoring result.
-    """
-    review_count = len(excerpts)
-    review_block = format_review_block(excerpts)
+    Score a book using OpenRouter, given an aggregated context text.
 
+    NEW PIPELINE: Receives context_text from fetch_book_context (Hardcover/Google/hybrid).
+    Logs diagnostic info for debugging the end-to-end flow.
+    """
+    logger.info(
+        f"score_book START: title='{title}', author='{author}', "
+        f"context_len={len(context_text)}, review_count={review_count}"
+    )
+    
+    if not OPENROUTER_API_KEY:
+        logger.error("OPENROUTER_API_KEY not set - cannot score book")
+        return {
+            "book_title": title,
+            "author": author,
+            "scores": {},
+            "overall_score": None,
+            "confidence": 0,
+            "reasoning": {},
+            "flags": ["missing_openrouter_api_key"],
+            "review_count": review_count,
+            "key_phrases": [],
+            "scoring_status": "error",
+        }
+
+    if not context_text or len(context_text.strip()) == 0:
+        logger.warning(f"No context text provided for '{title}' — cannot score")
+        return {
+            "book_title": title,
+            "author": author,
+            "scores": {},
+            "overall_score": None,
+            "confidence": 0,
+            "reasoning": {},
+            "flags": ["no_context_found"],
+            "review_count": review_count,
+            "key_phrases": [],
+            "scoring_status": "error",
+        }
 
     prompt = SCORING_PROMPT_TEMPLATE.format(
         title=title,
         author=author,
         series=series or "N/A",
         genre=f"{genre}" + (f" / {subgenre}" if subgenre else ""),
-        reviews=review_block,
+        context=context_text,
         review_count=review_count,
     )
 
-
     last_error = None
-
 
     for attempt in range(1, GEMINI_RETRY_MAX + 1):
         try:
             logger.info(f"OpenRouter request attempt {attempt} for '{title}'")
-            
+
             response = requests.post(
                 url="https://openrouter.ai/api/v1/chat/completions",
                 headers={
@@ -250,57 +280,75 @@ def score_book(
                     "HTTP-Referer": "https://stylescope.app",
                     "X-Title": "StyleScope",
                 },
-                data=json.dumps({
-                    "model": "meta-llama/llama-3.3-70b-instruct:free",
-                    "messages": [
-                        {"role": "user", "content": prompt}
-                    ],
-                })
+                data=json.dumps(
+                    {
+                        "model": OPENROUTER_MODEL,
+                        "messages": [
+                            {"role": "user", "content": prompt},
+                        ],
+                    }
+                ),
+                timeout=60,
             )
-            
+
             response.raise_for_status()
-            raw_text = response.json()["choices"][0]["message"]["content"]
-
-
+            raw = response.json()
+            raw_text = raw["choices"][0]["message"]["content"]
             parsed = _parse_llm_response(raw_text)
+
             if parsed is None:
                 raise ValueError("Could not parse JSON from LLM response")
-
 
             scores = parsed.get("scores", {})
             required_score_keys = {"readability", "grammar", "polish", "prose", "pacing"}
             if not required_score_keys.issubset(scores.keys()):
-                raise ValueError(f"Missing score keys: {required_score_keys - scores.keys()}")
-
+                missing = required_score_keys - set(scores.keys())
+                raise ValueError(f"Missing score keys: {missing}")
 
             parsed["overall_score"] = _calculate_overall(scores)
             parsed["scoring_status"] = "ok"
             parsed["review_count"] = review_count
 
-
+            # Add low-confidence flag if context is thin
+            flags = parsed.get("flags", [])
             if review_count < 5:
-                flags = parsed.get("flags", [])
-                flags.append("low_confidence: fewer than 5 review excerpts")
-                parsed["flags"] = flags
-
+                flags.append("low_confidence: fewer than 5 review-derived snippets")
+            if len(context_text) < 800:
+                flags.append("low_confidence: limited context length")
+            parsed["flags"] = flags
 
             logger.info(
-                f"Scored '{title}': overall={parsed['overall_score']}, "
-                f"readability={scores['readability']}, confidence={parsed.get('confidence', '?')}"
+                f"score_book SUCCESS: '{title}' scored {parsed['overall_score']}/100 "
+                f"(readability={scores['readability']}, confidence={parsed.get('confidence', '?')}%, "
+                f"status=ok)"
             )
-            return parsed
 
+            return parsed
 
         except Exception as e:
             last_error = str(e)
             logger.warning(f"Attempt {attempt} failed for '{title}': {e}")
             if attempt < GEMINI_RETRY_MAX:
-                wait_time = (2 ** attempt) + random.uniform(0, 1)
-                logger.info(f"  Retry {attempt + 1}/{GEMINI_RETRY_MAX} in {wait_time:.1f}s...")
+                # Exponential backoff with jitter
+                wait_time = (2**attempt) + random.uniform(0, 1)
+                logger.info(
+                    f" Retry {attempt + 1}/{GEMINI_RETRY_MAX} in {wait_time:.1f}s..."
+                )
                 time.sleep(wait_time)
 
-
     logger.error(f"All retries failed for '{title}': {last_error}")
+    
+    # Special handling for rate limits: return "temporarily_unavailable" status
+    error_classification = _classify_error(last_error)
+    is_rate_limit = error_classification == "api_error_rate_limit"
+    
+    flags = [error_classification]
+    if is_rate_limit:
+        flags = ["openrouter_rate_limited"]
+        logger.error(f"score_book FAILED: '{title}' hit OpenRouter rate limit (429)")
+    else:
+        logger.error(f"score_book FAILED: '{title}' hit {error_classification}")
+    
     return {
         "book_title": title,
         "author": author,
@@ -308,8 +356,8 @@ def score_book(
         "overall_score": None,
         "confidence": 0,
         "reasoning": {},
-        "flags": [_classify_error(last_error)],
+        "flags": flags,
         "review_count": review_count,
         "key_phrases": [],
-        "scoring_status": "error",
+        "scoring_status": "temporarily_unavailable" if is_rate_limit else "error",
     }
