@@ -56,3 +56,6 @@ dist-ssr/
 
 # Reorganization script (optional - remove if you want to keep it)
 reorganize.ps1
+
+# Claude worktrees
+.claude/
