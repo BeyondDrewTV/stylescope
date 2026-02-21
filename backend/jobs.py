@@ -8,6 +8,7 @@ Jobs are persisted to SQLite for durability and can be polled by the frontend.
 import uuid
 import json
 import datetime
+from datetime import timezone
 import os
 import sqlite3
 from typing import Optional, Dict, Any
@@ -55,7 +56,7 @@ def create_on_demand_job(
         job_id (UUID string)
     """
     job_id = str(uuid.uuid4())
-    now = datetime.datetime.utcnow().isoformat()
+    now = datetime.datetime.now(timezone.utc).isoformat()
 
     conn = _get_conn()
     c = conn.cursor()
@@ -120,7 +121,7 @@ def update_on_demand_job_status(
         result: Optional scoring result dict
         error_message: Optional error message
     """
-    now = datetime.datetime.utcnow().isoformat()
+    now = datetime.datetime.now(timezone.utc).isoformat()
     result_json = json.dumps(result) if result is not None else None
 
     conn = _get_conn()

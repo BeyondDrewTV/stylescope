@@ -40,7 +40,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import stripe
@@ -360,7 +360,7 @@ def _check_and_increment_usage(user_key: str) -> tuple[bool, int]:
     If allowed is False the count is NOT incremented.
     """
     from datetime import datetime
-    year_month = datetime.utcnow().strftime("%Y-%m")
+    year_month = datetime.now(timezone.utc).strftime("%Y-%m")
     conn = get_conn()
     try:
         c = conn.cursor()
@@ -394,7 +394,7 @@ def _check_and_increment_usage(user_key: str) -> tuple[bool, int]:
 def _get_usage_count(user_key: str) -> int:
     """Return how many on-demand scores the user has used this month."""
     from datetime import datetime
-    year_month = datetime.utcnow().strftime("%Y-%m")
+    year_month = datetime.now(timezone.utc).strftime("%Y-%m")
     conn = get_conn()
     try:
         row = conn.execute(
@@ -419,7 +419,7 @@ def _log_event(event: str, user_key: str | None = None,
         conn.execute(
             "INSERT INTO analytics_events (ts, event, user_key, session_id, properties) VALUES (?,?,?,?,?)",
             (
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
                 event,
                 user_key,
                 session_id,
@@ -1258,6 +1258,31 @@ def score_on_demand():
             "book_id": existing["id"],
             "message": "This book is already in the StyleScope library.",
         }), 200
+
+    # Deduplicate accidental duplicate submits (e.g. dev StrictMode double effects)
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    conn = get_conn()
+    try:
+        active_job = conn.execute(
+            """
+            SELECT id FROM on_demand_jobs
+            WHERE lower(title)=lower(?) AND lower(author)=lower(?)
+              AND status IN ('queued','running')
+              AND created_at >= ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (title, author, cutoff_iso),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if active_job:
+        return jsonify({
+            "job_id": active_job["id"],
+            "usage": {"used": _get_usage_count(user_key), "cap": ON_DEMAND_MONTHLY_CAP},
+            "status": "already_processing",
+        }), 202
 
     # Enforce monthly soft cap
     allowed, new_count = _check_and_increment_usage(user_key)
