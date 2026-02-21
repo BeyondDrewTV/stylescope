@@ -82,6 +82,7 @@ def upsert_scored_book(
     """
     try:
         dimension_scores  = scores.get("scores", {})
+        reasoning = scores.get("reasoning", {}) if isinstance(scores.get("reasoning"), dict) else {}
         overall_score     = scores.get("overall_score")
         confidence_val    = scores.get("confidence", 50)
         confidence_label  = (
@@ -119,6 +120,7 @@ def upsert_scored_book(
                 qualityScore, technicalQuality, proseStyle, pacing,
                 readability, craftExecution,
                 confidenceLevel, voteCount, spiceLevel,
+                technicalQualityNote, proseStyleNote, pacingNote, readabilityNote, craftExecutionNote,
                 officialContentWarnings,
                 scoring_status, context_source,
                 first_scored_at, last_scored_at,
@@ -129,6 +131,7 @@ def upsert_scored_book(
                 ?,?,?,?,
                 ?,?,
                 ?,?,?,
+                ?,?,?,?, ?,
                 ?,
                 ?,?,
                 ?,?,
@@ -145,6 +148,11 @@ def upsert_scored_book(
                 confidenceLevel         = excluded.confidenceLevel,
                 voteCount               = excluded.voteCount,
                 spiceLevel              = excluded.spiceLevel,
+                technicalQualityNote     = excluded.technicalQualityNote,
+                proseStyleNote           = excluded.proseStyleNote,
+                pacingNote               = excluded.pacingNote,
+                readabilityNote          = excluded.readabilityNote,
+                craftExecutionNote       = excluded.craftExecutionNote,
                 officialContentWarnings = excluded.officialContentWarnings,
                 scoring_status          = excluded.scoring_status,
                 context_source          = excluded.context_source,
@@ -176,6 +184,11 @@ def upsert_scored_book(
             confidence_label,
             vote_count_proxy,
             spice_level,
+            (reasoning.get("grammar") or "")[:1200] or None,
+            (reasoning.get("prose") or "")[:1200] or None,
+            (reasoning.get("pacing") or "")[:1200] or None,
+            (reasoning.get("readability") or "")[:1200] or None,
+            (reasoning.get("polish") or "")[:1200] or None,
             official_cw_doc,
             scoring_status,
             context_source,

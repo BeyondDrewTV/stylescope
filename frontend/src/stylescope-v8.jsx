@@ -1,37 +1,29 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { UpgradeModal } from "./components/UpgradeModal";
-import { HiddenGemsExplorer } from "./components/HiddenGemsExplorer";
 import { api } from "./api/client";
+import { TOKENS } from "./designTokens";
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
+const D = TOKENS.dark;
 const T = {
-  // Backgrounds
-  bgApp:      '#05070B',
-  bgSurface:  '#10131A',
-  bgElevated: '#171B24',
-  bgHover:    '#1C2130',
-
-  // Text
-  textPrimary:   '#F5F5F7',
-  textSecondary: '#A5A9B5',
-  textMuted:     '#6D7280',
-
-  // Accent (muted rose)
-  accent:        '#E08BAA',
-  accentSoft:    'rgba(224,139,170,0.15)',
-  accentSofter:  'rgba(224,139,170,0.08)',
-
-  // Semantic
-  positive:      '#6AD2A0',
-  positiveSoft:  'rgba(106,210,160,0.12)',
-  warning:       '#F5C56A',
-  warningSoft:   'rgba(245,197,106,0.12)',
-  danger:        '#F28C8C',
-  dangerSoft:    'rgba(242,140,140,0.12)',
-
-  // Borders
-  borderSubtle: '#1E2230',
-  borderStrong: '#2A2F3E',
+  bgApp: D.bgApp,
+  bgSurface: D.bgSurface,
+  bgElevated: D.bgElevated,
+  bgHover: D.bgHover,
+  textPrimary: D.textPrimary,
+  textSecondary: D.textSecondary,
+  textMuted: D.textMuted,
+  accent: D.accentPrimary,
+  accentSoft: D.accentPrimarySoft,
+  accentSofter: D.accentPrimarySofter,
+  positive: D.accentPositive,
+  positiveSoft: 'rgba(106,210,160,0.12)',
+  warning: D.accentWarning,
+  warningSoft: 'rgba(245,197,106,0.12)',
+  danger: D.accentDanger,
+  dangerSoft: 'rgba(242,140,140,0.12)',
+  borderSubtle: D.borderSubtle,
+  borderStrong: D.borderStrong,
   borderAccent: 'rgba(224,139,170,0.2)',
 };
 
@@ -73,14 +65,34 @@ const globalCSS = `
     --text-primary: ${T.textPrimary};
     --text-secondary: ${T.textSecondary};
     --text-muted: ${T.textMuted};
-    --accent: ${T.accent};
-    --accent-soft: ${T.accentSoft};
-    --positive: ${T.positive};
-    --warning: ${T.warning};
-    --danger: ${T.danger};
+    --accent-primary: ${T.accent};
+    --accent-primary-soft: ${T.accentSoft};
+    --accent-positive: ${T.positive};
+    --accent-warning: ${T.warning};
+    --accent-danger: ${T.danger};
     --border-subtle: ${T.borderSubtle};
     --border-strong: ${T.borderStrong};
+    --type-display-lg: 44px;
+    --type-heading-md: 21px;
+    --type-heading-sm: 17px;
+    --type-body-md: 15px;
+    --type-label-sm: 12px;
   }
+
+  [data-theme='light'] {
+    --bg-app: ${TOKENS.light.bgApp};
+    --bg-surface: ${TOKENS.light.bgSurface};
+    --bg-elevated: ${TOKENS.light.bgElevated};
+    --text-primary: ${TOKENS.light.textPrimary};
+    --text-secondary: ${TOKENS.light.textSecondary};
+    --text-muted: ${TOKENS.light.textMuted};
+  }
+
+  .type-display-lg { font-size: var(--type-display-lg); font-weight: 600; line-height: 1; }
+  .type-heading-md { font-size: var(--type-heading-md); font-weight: 600; line-height: 1.25; }
+  .type-heading-sm { font-size: var(--type-heading-sm); font-weight: 600; line-height: 1.3; }
+  .type-body-md { font-size: var(--type-body-md); font-weight: 400; line-height: 1.5; }
+  .type-label-sm { font-size: var(--type-label-sm); font-weight: 500; line-height: 1.3; }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -363,14 +375,13 @@ function ScoreDisplay({ score }) {
   return (
     <div className="score-display" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
       <div style={{
-        fontFamily: "'DM Serif Display', serif",
-        fontSize: 52, fontWeight: 400, lineHeight: 1,
+        fontSize: 'var(--type-display-lg)', fontWeight: 600, lineHeight: 1,
         color: col,
         letterSpacing: '-0.02em',
       }}>
         {score}
       </div>
-      <div style={{ fontSize: 13, color: T.textMuted, marginTop: 2 }}>out of 100</div>
+      <div className="type-label-sm" style={{ color: T.textMuted, marginTop: 2 }}>out of 100</div>
     </div>
   );
 }
@@ -411,7 +422,7 @@ function ConfidenceChip({ level }) {
   };
   const m = map[level?.toLowerCase()] || map.medium;
   return (
-    <span className="pill" style={{ background: m.bg, color: m.color, fontSize: 11, padding: '3px 8px', border: `1px solid ${m.color}25` }}>
+    <span className="pill type-label-sm" style={{ background: m.bg, color: m.color, padding: '3px 8px', border: `1px solid ${m.color}25` }}>
       {m.label}
     </span>
   );
@@ -429,6 +440,30 @@ function scoreSummaryLine(scores, dims) {
   if (overall >= 50) return `Uneven — ${best.name.toLowerCase()} holds it together.`;
   return `Struggles with ${worst.name.toLowerCase()}.`;
 }
+
+
+const DIMENSION_DETAILS = {
+  Readability: {
+    key: 'readabilityNote',
+    definition: 'How easy the prose and structure are to follow for most readers.',
+  },
+  'Technical Quality': {
+    key: 'technicalQualityNote',
+    definition: 'Sentence-level mechanics: grammar, clarity, and control of fundamentals.',
+  },
+  'Prose Style': {
+    key: 'proseStyleNote',
+    definition: 'Voice and stylistic choices: how intentional and effective the writing feels.',
+  },
+  Pacing: {
+    key: 'pacingNote',
+    definition: 'How consistently the book moves, balances momentum, and avoids drag.',
+  },
+  'Craft Execution': {
+    key: 'craftExecutionNote',
+    definition: 'Overall editorial polish and cohesion across scenes, structure, and delivery.',
+  },
+};
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 function SkeletonCard() {
@@ -538,6 +573,7 @@ function HorizontalBookCard({ book, onSelect }) {
 function BookCard({ book, onSelect, onRequest, index }) {
   const scored = book.qualityScore > 0;
   const hasCW  = (book.officialContentWarnings?.warnings?.length > 0) || (book.contentWarnings?.length > 0);
+  const confidenceLabel = book.confidenceLevel === 'high' ? 'High' : book.confidenceLevel === 'medium' ? 'Medium' : 'Estimate';
   return (
     <div className="book-card card-appear"
       style={{ animationDelay: `${Math.min(index * 30, 300)}ms` }}
@@ -546,55 +582,41 @@ function BookCard({ book, onSelect, onRequest, index }) {
       onKeyDown={(e) => e.key === 'Enter' && onSelect(book)}
       aria-label={`${book.title} by ${book.author}`}
     >
-      <div style={{ padding: '12px 14px', display: 'flex', gap: 12, alignItems: 'center' }}>
-        {/* Cover */}
-        <BookCover book={book} width={48} height={68} radius={6}/>
+      <div style={{ padding: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
+        <BookCover book={book} width={48} height={72} radius={6}/>
 
-        {/* Info */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h3 style={{
-            fontSize: 14, fontWeight: 600, color: T.textPrimary,
-            lineHeight: 1.35, marginBottom: 3,
-            overflow: 'hidden', display: '-webkit-box',
-            WebkitLineClamp: 1, WebkitBoxOrient: 'vertical',
-          }}>{book.title}</h3>
-          <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 7, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {book.author}
-          </p>
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
-            {book.spiceLevel != null && (
-              <SpiceLevelBadge level={book.spiceLevel} variant="compact"/>
-            )}
+          <h3 className="type-heading-sm" style={{ color: T.textPrimary, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{book.title}</h3>
+          <p className="type-label-sm" style={{ color: T.textSecondary, marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{book.author}</p>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <span className="pill type-label-sm" style={{ background: T.bgElevated, color: T.textSecondary, border: `1px solid ${T.borderSubtle}`, padding: '2px 8px' }}>
+              {confidenceLabel}
+            </span>
             {hasCW && (
-              <span className="pill" style={{ background: T.dangerSoft, color: T.danger, fontSize: 10, padding: '2px 7px', border: `1px solid ${T.danger}20` }}>
+              <span className="pill type-label-sm" style={{ background: T.accentSoft, color: T.textPrimary, border: `1px solid ${T.borderStrong}`, padding: '2px 8px' }}>
                 CW
-              </span>
-            )}
-            {book.confidenceLevel && (
-              <span style={{ fontSize: 11, color: T.textMuted }}>
-                {book.confidenceLevel === 'high' ? '●' : book.confidenceLevel === 'medium' ? '◐' : '○'}
               </span>
             )}
           </div>
         </div>
 
-        {/* Right: score + chevron */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           {scored ? (
             <ScorePill score={book.qualityScore}/>
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); onRequest(book); }}
+              className="type-label-sm"
               style={{
-                padding: '6px 10px', borderRadius: 7,
+                padding: '6px 10px', borderRadius: 999,
                 background: T.accentSofter, border: `1px solid ${T.borderAccent}`,
-                color: T.accent, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                fontFamily: "'DM Sans', sans-serif", whiteSpace: 'nowrap',
+                color: T.accent, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif", whiteSpace: 'nowrap',
               }}
             >
-              Score it
+              Score
             </button>
           )}
+          <Icons.Chevron width={14} height={14} style={{ color: T.textMuted, opacity: 0.7 }}/>
         </div>
       </div>
     </div>
@@ -602,11 +624,11 @@ function BookCard({ book, onSelect, onRequest, index }) {
 }
 
 // ─── Section Row (Home Horizontal Scroll) ────────────────────────────────────
-function SectionRow({ title, icon: SectionIcon, iconColor, books, loading, onSelect }) {
+function SectionRow({ title, icon, iconColor, books, loading, onSelect }) {
   return (
     <div style={{ marginBottom: 32 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '0 16px', marginBottom: 12 }}>
-        <SectionIcon width={15} height={15} style={{ color: iconColor, opacity: 0.8 }}/>
+        {icon({ width: 15, height: 15, style: { color: iconColor, opacity: 0.8 } })}
         <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 600, color: T.textSecondary, letterSpacing: '0.01em' }}>
           {title}
         </span>
@@ -622,7 +644,7 @@ function SectionRow({ title, icon: SectionIcon, iconColor, books, loading, onSel
 }
 
 // ─── Home Tab ─────────────────────────────────────────────────────────────────
-function HomeTab({ onSelect, onRequest, onGoSearch, onUpgradeNeeded, userPremium }) {
+function HomeTab({ onSelect, onGoSearch }) {
   const [sections, setSections] = useState({ recentlyScored: [], highestRated: [], randomPicks: [] });
   const [loading, setLoading]   = useState(true);
 
@@ -721,25 +743,6 @@ function HomeTab({ onSelect, onRequest, onGoSearch, onUpgradeNeeded, userPremium
             onSelect={onSelect}
           />
 
-          {/* Hidden Gems */}
-          <div style={{ padding: '0 16px', marginBottom: 28 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12 }}>
-              <Icons.Gem width={15} height={15} style={{ color: T.warning, opacity: 0.8 }}/>
-              <span style={{ fontSize: 14, fontWeight: 600, color: T.textSecondary }}>
-                Hidden gems
-              </span>
-              {!userPremium && (
-                <span className="pill" style={{ background: T.accentSofter, color: T.accent, fontSize: 10, padding: '2px 7px' }}>
-                  EARLY ACCESS
-                </span>
-              )}
-            </div>
-            <HiddenGemsExplorer
-              userPremium={userPremium}
-              onBookFound={(gem) => onSelect(gem)}
-              onUpgradeNeeded={onUpgradeNeeded}
-            />
-          </div>
         </div>
       )}
     </div>
@@ -752,8 +755,8 @@ function SearchTab({ onSelect, onRequest, onSearchExecuted }) {
   const [results, setResults]       = useState([]);
   const [searching, setSearching]   = useState(false);
   const [searched, setSearched]     = useState(false);
-  const [showISBN, setShowISBN]     = useState(false);
-  const [isbnValue, setIsbnValue]   = useState('');
+  const [requestAuthor, setRequestAuthor] = useState('');
+  const [requestError, setRequestError] = useState('');
   const [recentSearches, setRecent] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ss_recent') || '[]'); } catch { return []; }
   });
@@ -765,50 +768,37 @@ function SearchTab({ onSelect, onRequest, onSearchExecuted }) {
   const saveRecent = (q) => {
     const updated = [q, ...recentSearches.filter((x) => x !== q)].slice(0, 5);
     setRecent(updated);
-    try { localStorage.setItem('ss_recent', JSON.stringify(updated)); } catch {}
+    try { localStorage.setItem('ss_recent', JSON.stringify(updated)); } catch { /* ignore */ }
   };
 
-  const doSearch = useCallback(async (q) => {
+  const doSearch = async (q) => {
     if (!q.trim()) { setResults([]); setSearched(false); return; }
     setSearching(true);
     setSearched(true);
     saveRecent(q.trim());
     try {
-      const res  = await fetch(`/api/books/search?q=${encodeURIComponent(q)}`);
+      const res = await fetch(`/api/books/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       setResults(Array.isArray(data) ? data : (data.books || []));
       onSearchExecuted?.();
     } catch { setResults([]); }
     finally { setSearching(false); }
-  }, [recentSearches, onSearchExecuted]);
+  };
 
   const handleChange = (e) => {
     const val = e.target.value;
     setQuery(val);
+    setRequestError('');
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => doSearch(val), 320);
   };
 
   const clearSearch = () => { setQuery(''); setResults([]); setSearched(false); inputRef.current?.focus(); };
 
-  const handleISBNSearch = async () => {
-    if (!isbnValue.trim()) return;
-    setQuery(isbnValue);
-    setShowISBN(false);
-    await doSearch(isbnValue);
-    setIsbnValue('');
-  };
-
   return (
     <div className="main-scroll">
-      {/* Search header */}
-      <div style={{ padding: '24px 16px 16px' }}>
-        <h2 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 24, fontWeight: 400, color: T.textPrimary, marginBottom: 16, letterSpacing: '-0.01em' }}>
-          Search
-        </h2>
-
-        {/* Search bar */}
-        <div style={{ position: 'relative', marginBottom: 12 }}>
+      <div style={{ padding: '20px 16px 12px' }}>
+        <div style={{ position: 'relative', marginBottom: 18 }}>
           <div style={{ position: 'absolute', left: 15, top: '50%', transform: 'translateY(-50%)', color: T.textMuted, pointerEvents: 'none' }}>
             <Icons.Search width={17} height={17}/>
           </div>
@@ -821,133 +811,66 @@ function SearchTab({ onSelect, onRequest, onSearchExecuted }) {
             placeholder="Search title or author…"
             autoComplete="off" autoCorrect="off" spellCheck={false}
           />
-          <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', display: 'flex', gap: 2 }}>
-            {query && (
-              <button onClick={clearSearch} aria-label="Clear" style={{
-                width: 28, height: 28, borderRadius: '50%', background: 'none', border: 'none',
-                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: T.textMuted,
-              }}>
-                <Icons.X width={14} height={14}/>
-              </button>
-            )}
-            <button onClick={() => alert('Camera ISBN scanning coming soon!')} aria-label="Scan ISBN" style={{
+          {query && (
+            <button onClick={clearSearch} aria-label="Clear" style={{
+              position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
               width: 28, height: 28, borderRadius: '50%', background: 'none', border: 'none',
-              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: T.textMuted,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textMuted,
             }}>
-              <Icons.Camera width={16} height={16}/>
+              <Icons.X width={14} height={14}/>
             </button>
-          </div>
+          )}
         </div>
 
-        {/* ISBN toggle */}
-        <button onClick={() => setShowISBN((v) => !v)} style={{
-          background: 'none', border: 'none', cursor: 'pointer',
-          color: T.accent, fontSize: 12, fontWeight: 500,
-          fontFamily: "'DM Sans', sans-serif", padding: '4px 0',
-          marginBottom: showISBN ? 12 : 0, opacity: 0.85,
-        }}>
-          {showISBN ? 'Hide ISBN input' : 'Enter ISBN manually'}
-        </button>
+        <h2 className="type-heading-sm" style={{ color: T.textPrimary, marginBottom: 12 }}>
+          {searched ? 'Results' : 'Recently scored'}
+        </h2>
 
-        {/* ISBN input */}
-        {showISBN && (
-          <div className="fade-in" style={{
-            background: T.bgSurface, border: `1px solid ${T.borderSubtle}`,
-            borderRadius: 10, padding: 14, marginBottom: 12,
-          }}>
-            <label style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              ISBN (10 or 13 digits)
-            </label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                className="search-input"
-                style={{ padding: '10px 14px', borderRadius: 8 }}
-                type="text" inputMode="numeric"
-                placeholder="9781234567890"
-                value={isbnValue}
-                onChange={(e) => setIsbnValue(e.target.value.replace(/[^0-9]/g, ''))}
-                maxLength={13}
-              />
-              <button onClick={handleISBNSearch} className="btn-primary" style={{ width: 'auto', padding: '10px 16px', borderRadius: 8, flexShrink: 0, minHeight: 44 }}>
-                Search
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Recent searches */}
         {!searched && !searching && recentSearches.length > 0 && (
-          <div style={{ marginTop: 16 }}>
-            <p className="section-header">Recent</p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-              {recentSearches.map((q, i) => (
-                <button key={i} onClick={() => { setQuery(q); doSearch(q); }} style={{
-                  padding: '7px 14px', borderRadius: 999,
-                  background: T.bgSurface, border: `1px solid ${T.borderSubtle}`,
-                  color: T.textSecondary, fontSize: 13, cursor: 'pointer',
-                  fontFamily: "'DM Sans', sans-serif", fontWeight: 400,
-                  minHeight: 36, transition: 'border-color 0.15s',
-                }}>
-                  {q}
-                </button>
-              ))}
-            </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 14 }}>
+            {recentSearches.map((q, i) => (
+              <button key={i} onClick={() => { setQuery(q); doSearch(q); }} className="type-label-sm" style={{
+                padding: '7px 14px', borderRadius: 999,
+                background: T.bgSurface, border: `1px solid ${T.borderSubtle}`,
+                color: T.textSecondary, cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+              }}>{q}</button>
+            ))}
           </div>
         )}
 
-        {/* Empty state */}
-        {!searched && !searching && recentSearches.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '52px 0 32px' }}>
-            <Icons.Book width={36} height={36} style={{ color: T.textMuted, opacity: 0.3, margin: '0 auto 14px', display: 'block' }}/>
-            <p style={{ color: T.textMuted, fontSize: 14 }}>Search our library of scored romance books.</p>
-            <p style={{ color: T.textMuted, fontSize: 13, marginTop: 6, opacity: 0.7 }}>
-              Can't find a book? We'll score it for you.
-            </p>
-          </div>
-        )}
-
-        {/* Searching */}
         {searching && (
           <div style={{ textAlign: 'center', padding: '52px 0', color: T.textMuted }}>
-            <div style={{
-              width: 24, height: 24, border: `2px solid ${T.borderStrong}`,
-              borderTopColor: T.accent, borderRadius: '50%',
-              animation: 'spin 0.7s linear infinite', margin: '0 auto 14px',
-            }}/>
-            <span style={{ fontSize: 14 }}>Searching…</span>
+            <div style={{ width: 24, height: 24, border: `2px solid ${T.borderStrong}`, borderTopColor: T.accent, borderRadius: '50%', animation: 'spin 0.7s linear infinite', margin: '0 auto 14px' }}/>
+            <span className="type-body-md">Searching…</span>
           </div>
         )}
 
-        {/* No results */}
         {!searching && searched && results.length === 0 && (
-          <div style={{ padding: '40px 0 24px' }}>
-            <div style={{ textAlign: 'center', marginBottom: 24 }}>
-              <Icons.Search width={36} height={36} style={{ color: T.textMuted, opacity: 0.3, margin: '0 auto 12px', display: 'block' }}/>
-              <p style={{ color: T.textSecondary, fontSize: 15, fontWeight: 500, marginBottom: 4 }}>
-                Not in our library yet.
-              </p>
-              <p style={{ color: T.textMuted, fontSize: 13, lineHeight: 1.5 }}>
-                Pepper couldn't find this one. Want us to take a look?
+          <div style={{ padding: '24px 0 24px' }}>
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <div style={{ width: 68, height: 68, borderRadius: 14, margin: '0 auto 12px', background: T.bgSurface, border: `1px solid ${T.borderSubtle}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icons.Book width={28} height={28} style={{ color: T.accent, opacity: 0.9 }}/>
+              </div>
+              <p className="type-body-md" style={{ color: T.textSecondary }}>
+                Pepper couldn't find this book yet. Want us to take a look?
               </p>
             </div>
-            {/* On-demand prompt */}
-            <div style={{
-              background: T.bgSurface, border: `1px solid ${T.borderSubtle}`,
-              borderRadius: 12, padding: '18px 16px',
-            }}>
-              <p style={{ fontSize: 15, fontWeight: 600, color: T.textPrimary, marginBottom: 4 }}>
-                We haven't scored this one yet.
-              </p>
-              <p style={{ fontSize: 13, color: T.textMuted, marginBottom: 16, lineHeight: 1.5 }}>
-                Want us to take a look?
-              </p>
-              <button
-                className="btn-primary"
-                onClick={() => onRequest({ title: query, author: '' })}
-                style={{ fontSize: 14 }}
-              >
+            <div style={{ background: T.bgSurface, border: `1px solid ${T.borderSubtle}`, borderRadius: 12, padding: '18px 16px' }}>
+              <p className="type-heading-sm" style={{ color: T.textPrimary, marginBottom: 4 }}>We haven't scored this one yet.</p>
+              <p className="type-body-md" style={{ color: T.textSecondary, marginBottom: 12 }}>Want us to take a look?</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+                <input className="search-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Title" />
+                <input className="search-input" value={requestAuthor} onChange={(e) => setRequestAuthor(e.target.value)} placeholder="Author" />
+              </div>
+              {requestError && <p className="type-label-sm" style={{ color: T.danger, marginBottom: 8 }}>{requestError}</p>}
+              <button className="btn-primary" onClick={() => {
+                if (!query.trim() || !requestAuthor.trim()) {
+                  setRequestError('Please enter both title and author.');
+                  return;
+                }
+                setRequestError('');
+                onRequest({ title: query.trim(), author: requestAuthor.trim() });
+              }} style={{ minHeight: 46 }}>
                 Score this book (~30–60s)
               </button>
             </div>
@@ -955,12 +878,8 @@ function SearchTab({ onSelect, onRequest, onSearchExecuted }) {
         )}
       </div>
 
-      {/* Results */}
       {!searching && results.length > 0 && (
-        <div style={{ padding: '0 16px 100px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <p style={{ fontSize: 12, color: T.textMuted, marginBottom: 4 }}>
-            {results.length} result{results.length !== 1 ? 's' : ''}
-          </p>
+        <div style={{ padding: '0 16px 100px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {results.map((book, i) => (
             <BookCard key={book.id} book={book} onSelect={onSelect} onRequest={onRequest} index={i}/>
           ))}
@@ -974,6 +893,7 @@ function SearchTab({ onSelect, onRequest, onSearchExecuted }) {
 function BookModal({ book, onClose, onRequest, onCwExpanded, onSectionViewed }) {
   const scored = book.qualityScore > 0;
   const dims   = book.dimensions || [];
+  const [activeDimension, setActiveDimension] = useState(null);
 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
@@ -984,240 +904,122 @@ function BookModal({ book, onClose, onRequest, onCwExpanded, onSectionViewed }) 
   const handleCwExpand     = () => onCwExpanded?.(book);
 
   const cwList    = book.officialContentWarnings?.warnings || book.contentWarnings || [];
-  const cwSource  = book.officialContentWarnings ? book.officialContentWarnings.source : 'community_inferred';
+  const cwSource  = book.officialContentWarnings ? book.officialContentWarnings.source : 'llm_inferred';
   const hasCW     = cwList.length > 0;
-  const cwIsOfficialEnough = !!book.officialContentWarnings;
 
   const cwSourceLabel = {
-    'llm_inferred':  'LLM inferred from description',
-    'publisher':     'Publisher',
-    'author':        'Author',
-    'manual':        'Editorial review',
-    'community_inferred': 'Community reported',
+    llm_inferred: 'LLM inferred from description',
+    publisher: 'publisher / manual',
+    author: 'publisher / manual',
+    manual: 'publisher / manual',
+    community_inferred: 'LLM inferred from description',
   }[cwSource] || cwSource;
 
   const summary = scored ? scoreSummaryLine(book, dims) : null;
+  const activeMeta = activeDimension ? DIMENSION_DETAILS[activeDimension] : null;
+  const activeBookNote = activeMeta ? book[activeMeta.key] : null;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-sheet modal-enter" onClick={(e) => e.stopPropagation()}>
-
-        {/* Pull handle */}
         <div style={{ width: 36, height: 3, borderRadius: 2, background: T.borderStrong, margin: '14px auto 0', flexShrink: 0 }}/>
 
-        {/* ── HERO ─────────────────────────────────────────────────── */}
-        <div style={{ padding: '20px 20px 0' }}>
-
-          {/* Top row: cover + title block + close */}
-          <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 20 }}>
-            <BookCover book={book} width={80} height={116} radius={8}/>
-
-            <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
-              <h2 style={{
-                fontFamily: "'DM Serif Display', serif",
-                fontSize: 20, fontWeight: 400, lineHeight: 1.25,
-                color: T.textPrimary, marginBottom: 5,
-                letterSpacing: '-0.01em',
-              }}>{book.title}</h2>
-              <p style={{ fontSize: 14, color: T.textSecondary, marginBottom: 6 }}>{book.author}</p>
-              {book.series && (
-                <p style={{ fontSize: 12, color: T.textMuted }}>
-                  {book.series}{book.seriesNumber ? ` · Book ${book.seriesNumber}` : ''}
-                </p>
-              )}
-            </div>
-
-            <button onClick={onClose} aria-label="Close" style={{
-              width: 32, height: 32, borderRadius: 8,
-              background: T.bgSurface, border: `1px solid ${T.borderSubtle}`,
-              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0, color: T.textMuted,
-            }}>
-              <Icons.X width={15} height={15}/>
-            </button>
-          </div>
-
-          {/* Score block */}
-          {scored ? (
-            <div style={{
-              background: T.bgSurface, border: `1px solid ${T.borderSubtle}`,
-              borderRadius: 12, padding: '16px 18px', marginBottom: 20,
-              display: 'flex', alignItems: 'center', gap: 18,
-            }}>
-              <ScoreDisplay score={book.qualityScore}/>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                {summary && (
-                  <p style={{ fontSize: 14, color: T.textSecondary, lineHeight: 1.45, marginBottom: 8 }}>
-                    {summary}
-                  </p>
-                )}
-                <ConfidenceChip level={book.confidenceLevel}/>
+        <div style={{ padding: '20px 20px 36px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div style={{ background: T.bgSurface, border: `1px solid ${T.borderSubtle}`, borderRadius: 14, padding: 14 }}>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 14 }}>
+              <BookCover book={book} width={80} height={120} radius={8}/>
+              <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
+                <h2 className="type-heading-md" style={{ color: T.textPrimary, marginBottom: 6 }}>{book.title}</h2>
+                <p className="type-body-md" style={{ color: T.textSecondary, marginBottom: 6 }}>{book.author}</p>
+                {book.series && <p className="type-label-sm" style={{ color: T.textMuted }}>{book.series}{book.seriesNumber ? ` · Book ${book.seriesNumber}` : ''}</p>}
               </div>
-            </div>
-          ) : (
-            /* Unscored CTA */
-            <div style={{
-              background: T.bgSurface, border: `1px solid ${T.borderSubtle}`,
-              borderRadius: 12, padding: '18px', marginBottom: 20, textAlign: 'center',
-            }}>
-              <p style={{ fontSize: 15, fontWeight: 600, color: T.textPrimary, marginBottom: 4 }}>
-                We haven't scored this one yet.
-              </p>
-              <p style={{ fontSize: 13, color: T.textMuted, marginBottom: 14 }}>
-                Want us to take a look?
-              </p>
-              <button className="btn-primary" onClick={(e) => { e.stopPropagation(); onRequest(book); }}>
-                Score this book (~30–60s)
+              <button onClick={onClose} aria-label="Close" style={{ width: 32, height: 32, borderRadius: 8, background: T.bgElevated, border: `1px solid ${T.borderSubtle}`, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textMuted }}>
+                <Icons.X width={15} height={15}/>
               </button>
             </div>
-          )}
 
-          {/* Spice */}
-          {book.spiceLevel != null && (
-            <div style={{ marginBottom: 20 }}>
-              <SpiceLevelBadge level={book.spiceLevel} variant="detailed" showDescription/>
-            </div>
-          )}
-
-          {/* Badges row */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
-            {book.genre && (
-              <span className="pill" style={{ background: T.bgSurface, color: T.textSecondary, border: `1px solid ${T.borderSubtle}`, fontSize: 12 }}>
-                {book.genre}
-              </span>
-            )}
-            {book.publishedYear && (
-              <span className="pill" style={{ background: T.bgSurface, color: T.textMuted, border: `1px solid ${T.borderSubtle}`, fontSize: 12 }}>
-                {book.publishedYear}
-              </span>
+            {scored ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+                <ScoreDisplay score={book.qualityScore}/>
+                {summary && <p className="type-body-md" style={{ color: T.textSecondary }}>{summary}</p>}
+                <ConfidenceChip level={book.confidenceLevel}/>
+              </div>
+            ) : (
+              <div>
+                <p className="type-heading-sm" style={{ color: T.textPrimary, marginBottom: 4 }}>We haven't scored this one yet.</p>
+                <p className="type-body-md" style={{ color: T.textSecondary, marginBottom: 14 }}>Want us to take a look?</p>
+                <button className="btn-primary" onClick={(e) => { e.stopPropagation(); onRequest(book); }} style={{ minHeight: 46 }}>Score this book (~30–60s)</button>
+              </div>
             )}
           </div>
-        </div>
 
-        {/* Divider */}
-        <div style={{ height: 1, background: T.borderSubtle }}/>
-
-        {/* ── BODY SECTIONS ─────────────────────────────────────────── */}
-        <div style={{ padding: '20px 20px 40px', display: 'flex', flexDirection: 'column', gap: 24 }}>
-
-          {/* Synopsis */}
-          {(book.synopsis || book.description) && (
-            <div>
-              <p className="section-header">About</p>
-              <p style={{ fontSize: 14, color: T.textSecondary, lineHeight: 1.65 }}>
-                {book.synopsis || book.description}
-              </p>
-            </div>
-          )}
-
-          {/* ── Writing Quality Breakdown ── */}
           {scored && dims.length > 0 && (
-            <div>
-              <p
-                className="section-header"
-                style={{ cursor: 'default' }}
-                onClick={() => handleSectionClick('score_breakdown')}
-              >
-                Writing quality breakdown
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+            <div style={{ background: T.bgSurface, border: `1px solid ${T.borderSubtle}`, borderRadius: 12, padding: 14 }}>
+              <p className="type-heading-sm" style={{ color: T.textPrimary, marginBottom: 12 }} onClick={() => handleSectionClick('score_breakdown')}>Writing quality breakdown</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {dims.map((d) => {
-                  const val = d.score * 10; // convert /10 to /100 for bar
-                  const col = d.score >= 8 ? T.positive : d.score >= 6 ? T.warning : T.danger;
+                  const value = (d.score || 0) * 10;
+                  const col = value >= 80 ? T.positive : value >= 60 ? T.warning : T.danger;
                   return (
                     <div key={d.name}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                        <span style={{ fontSize: 13, color: T.textSecondary, fontWeight: 400 }}>{d.name}</span>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: col }}>{d.score}<span style={{ fontSize: 11, color: T.textMuted, fontWeight: 400 }}>/10</span></span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span className="type-body-md" style={{ color: T.textSecondary }}>{d.name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <button
+                            className="type-label-sm"
+                            onMouseEnter={() => setActiveDimension(d.name)}
+                            onMouseLeave={() => setActiveDimension(null)}
+                            onClick={() => setActiveDimension((curr) => (curr === d.name ? null : d.name))}
+                            style={{ border: `1px solid ${T.borderStrong}`, background: T.bgElevated, color: T.textSecondary, width: 20, height: 20, borderRadius: 999, cursor: 'pointer' }}
+                            aria-label={`Explain ${d.name}`}
+                          >
+                            i
+                          </button>
+                          <span className="type-label-sm" style={{ color: col }}>{value}</span>
+                        </div>
                       </div>
-                      <div style={{ height: 4, background: T.borderSubtle, borderRadius: 2, overflow: 'hidden' }}>
-                        <div style={{
-                          height: '100%', width: `${val}%`,
-                          background: col, borderRadius: 2,
-                          transition: 'width 0.7s cubic-bezier(0.22,1,0.36,1)',
-                        }}/>
-                      </div>
+                      <div style={{ height: 6, borderRadius: 999, background: T.borderSubtle, overflow: 'hidden' }}><div style={{ height: '100%', width: `${value}%`, background: col, borderRadius: 999 }} /></div>
                     </div>
                   );
                 })}
               </div>
+              {activeMeta && (
+                <div style={{ marginTop: 12, border: `1px solid ${T.borderStrong}`, borderRadius: 10, padding: 12, background: T.bgElevated }}>
+                  <p className="type-label-sm" style={{ color: T.textPrimary, marginBottom: 6 }}>{activeDimension}</p>
+                  <p className="type-label-sm" style={{ color: T.textSecondary, marginBottom: 8 }}>{activeMeta.definition}</p>
+                  <p className="type-label-sm" style={{ color: T.textMuted }}>
+                    {activeBookNote || 'Book-specific explanation is not available yet for this dimension.'}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
-          {/* ── Content Warnings ── */}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, cursor: 'default' }}
-              onClick={() => { handleSectionClick('content_warnings'); if (hasCW) handleCwExpand(); }}
-            >
-              <Icons.Warning width={13} height={13} style={{ color: T.textMuted, flexShrink: 0 }}/>
-              <p className="section-header" style={{ marginBottom: 0 }}>Content warnings</p>
+          <div style={{ background: T.bgSurface, border: `1px solid ${T.borderSubtle}`, borderRadius: 12, padding: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12 }} onClick={() => { handleSectionClick('content_warnings'); if (hasCW) handleCwExpand(); }}>
+              <Icons.Warning width={14} height={14} style={{ color: T.textSecondary }}/>
+              <p className="type-heading-sm" style={{ color: T.textPrimary }}>Content warnings</p>
             </div>
-
-            {hasCW ? (
-              <div>
-                {/* Pills */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 12 }}>
-                  {cwList.map((w, i) => (
-                    <span key={i} className="pill" style={{
-                      background: cwIsOfficialEnough ? T.warningSoft : T.dangerSoft,
-                      color: cwIsOfficialEnough ? T.warning : T.danger,
-                      border: `1px solid ${cwIsOfficialEnough ? T.warning : T.danger}22`,
-                      fontSize: 12, padding: '5px 11px',
-                    }}>
-                      {w}
-                    </span>
-                  ))}
-                </div>
-
-                {/* Raw text expander (publisher source) */}
-                {book.officialContentWarnings?.rawText && (
-                  <details style={{ marginTop: 4 }} onToggle={handleCwExpand}>
-                    <summary style={{ fontSize: 12, color: T.textMuted, cursor: 'pointer', userSelect: 'none', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <Icons.ChevronLeft width={12} height={12} style={{ transform: 'rotate(-90deg)', transition: 'transform 0.2s' }}/>
-                      Full warning text
-                    </summary>
-                    <p style={{ fontSize: 13, color: T.textMuted, marginTop: 8, lineHeight: 1.55, paddingLeft: 2 }}>
-                      {book.officialContentWarnings.rawText}
-                    </p>
-                  </details>
-                )}
-
-                {/* Source line */}
-                <p style={{ fontSize: 11, color: T.textMuted, marginTop: 8, opacity: 0.8 }}>
-                  Source: {cwSourceLabel}
-                </p>
-              </div>
-            ) : (
-              <p style={{ fontSize: 13, color: T.textMuted, lineHeight: 1.5 }}>
-                None detected based on available info.
-              </p>
-            )}
+            {hasCW ? (<><div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{cwList.map((w, i) => <span key={i} className="pill type-label-sm" style={{ background: T.accentSoft, color: T.textPrimary, border: `1px solid ${T.borderSubtle}`, padding: '5px 10px' }}>{w}</span>)}</div><p className="type-label-sm" style={{ color: T.textMuted, marginTop: 10 }}>Source: {cwSourceLabel}</p></>) : <p className="type-body-md" style={{ color: T.textSecondary }}>None detected based on available info.</p>}
           </div>
 
-          {/* ── Confidence / Context strip ── */}
           {scored && (
-            <div style={{
-              background: T.bgSurface, border: `1px solid ${T.borderSubtle}`,
-              borderRadius: 10, padding: '13px 15px',
-              display: 'flex', gap: 12, alignItems: 'flex-start',
-            }}>
-              <Icons.Info width={15} height={15} style={{ color: T.textMuted, flexShrink: 0, marginTop: 1 }}/>
+            <div style={{ background: T.bgSurface, border: `1px solid ${T.borderSubtle}`, borderRadius: 12, padding: '13px 14px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <Icons.Info width={15} height={15} style={{ color: T.textSecondary, marginTop: 2 }}/>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: T.textSecondary }}>
-                    Confidence: {book.confidenceLevel ? book.confidenceLevel.charAt(0).toUpperCase() + book.confidenceLevel.slice(1) : 'Medium'}
-                  </span>
-                  <ConfidenceChip level={book.confidenceLevel}/>
-                </div>
-                <p style={{ fontSize: 12, color: T.textMuted, lineHeight: 1.5 }}>
-                  {book.contextSource === 'description_only'
-                    ? 'Based on description only — score may shift as more reader data arrives.'
-                    : book.contextSource === 'description_and_reviews'
-                    ? 'Based on description + community reviews.'
-                    : 'Based on description, ratings, and community reviews.'}
-                </p>
+                <p className="type-body-md" style={{ color: T.textPrimary, marginBottom: 3 }}>Confidence: {book.confidenceLevel ? book.confidenceLevel.charAt(0).toUpperCase() + book.confidenceLevel.slice(1) : 'Medium'}</p>
+                <p className="type-label-sm" style={{ color: T.textMuted }}>{book.contextSource === 'description_only' ? 'Based on description only; score may change as more data arrives.' : 'Based on description + ratings + some reviews.'}</p>
               </div>
             </div>
+          )}
+
+          <button className="btn-ghost" style={{ width: '100%' }} onClick={() => setActiveDimension('Readability')}>
+            How scoring works
+          </button>
+          {activeDimension === 'Readability' && (
+            <p className="type-label-sm" style={{ color: T.textMuted, marginTop: -8 }}>
+              We combine available book metadata with an LLM-based rubric to estimate writing quality. Scores are estimates, not absolute truth. Content warnings may be inferred and improve over time.
+            </p>
           )}
         </div>
       </div>
@@ -1226,7 +1028,7 @@ function BookModal({ book, onClose, onRequest, onCwExpanded, onSectionViewed }) 
 }
 
 // ─── Placeholder Tab ──────────────────────────────────────────────────────────
-function PlaceholderTab({ label, IconComp, description }) {
+function PlaceholderTab({ label, iconComp, description }) {
   return (
     <div className="main-scroll">
       <div style={{
@@ -1239,7 +1041,7 @@ function PlaceholderTab({ label, IconComp, description }) {
           background: T.bgSurface, border: `1px solid ${T.borderSubtle}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 4,
         }}>
-          <IconComp width={28} height={28} style={{ color: T.textMuted, opacity: 0.5 }}/>
+          {iconComp({ width: 28, height: 28, style: { color: T.textMuted, opacity: 0.5 } })}
         </div>
         <h2 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 22, fontWeight: 400, color: T.textPrimary }}>
           {label}
@@ -1258,25 +1060,24 @@ function PlaceholderTab({ label, IconComp, description }) {
 
 // ─── Bottom Nav ───────────────────────────────────────────────────────────────
 const TABS = [
-  { key: 'home',    label: 'Home',    IconComp: Icons.Home    },
-  { key: 'search',  label: 'Search',  IconComp: Icons.Search  },
-  { key: 'library', label: 'Library', IconComp: Icons.Library },
-  { key: 'profile', label: 'Profile', IconComp: Icons.Profile },
+  { key: 'search',  label: 'Search',  iconComp: Icons.Search  },
+  { key: 'library', label: 'Library', iconComp: Icons.Library },
+  { key: 'settings', label: 'Settings', iconComp: Icons.Profile },
 ];
 
 function BottomNav({ active, onTab }) {
   return (
     <nav className="bottom-nav" aria-label="Main navigation">
-      {TABS.map(({ key, label, IconComp }) => {
+      {TABS.map(({ key, label, iconComp }) => {
         const on = active === key;
         return (
           <button key={key} className="nav-btn" onClick={() => onTab(key)}
             aria-label={label} aria-current={on ? 'page' : undefined}
           >
-            <IconComp width={20} height={20} style={{
+            {iconComp({ width: 20, height: 20, style: {
               color: on ? T.accent : T.textMuted,
               transition: 'color 0.18s ease',
-            }}/>
+            }})}
             <span style={{
               fontSize: 10, fontFamily: "'DM Sans', sans-serif",
               fontWeight: on ? 600 : 400,
@@ -1337,7 +1138,7 @@ function ScoringOverlay({ book, onClose, onScored, sessionId }) {
         const res = await fetch('/api/score-on-demand', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: book.title, author: book.author, isbn: book.isbn || undefined, session_id: sessionId }),
+          body: JSON.stringify({ title: (book.title || '').trim(), author: (book.author || '').trim(), isbn: book.isbn || undefined, session_id: sessionId }),
         });
         const data = await res.json();
 
@@ -1350,7 +1151,7 @@ function ScoringOverlay({ book, onClose, onScored, sessionId }) {
           api.logEvent('on_demand_cap_seen', { sessionId });
           return;
         }
-        if (!res.ok || !data.job_id) throw new Error(data.error || 'Failed to start scoring');
+        if (!res.ok || !data.job_id) throw new Error(data.message || data.error || 'Failed to start scoring');
         jobId = data.job_id;
         api.logEvent('on_demand_started', { sessionId, properties: { title: book.title } });
       } catch (err) {
@@ -1374,7 +1175,7 @@ function ScoringOverlay({ book, onClose, onScored, sessionId }) {
             clearInterval(pollRef.current);
             setResult(data.result);
             setPhase('done');
-            onScored && onScored(data.result);
+            onScored && onScored(data.result, data.book);
             api.logEvent('on_demand_result_viewed', { sessionId, properties: { overall_score: data.result?.overall_score } });
           } else if (data.status === 'failed') {
             clearInterval(pollRef.current);
@@ -1464,7 +1265,7 @@ function ScoringOverlay({ book, onClose, onScored, sessionId }) {
 
   // Cap reached
   if (phase === 'cap') {
-    const { used = 0, cap = 10 } = capInfo || {};
+    const { cap = 10 } = capInfo || {};
     return overlay(
       <div style={{ textAlign: 'center' }}>
         <div style={{
@@ -1554,29 +1355,17 @@ function ScoringOverlay({ book, onClose, onScored, sessionId }) {
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [tab, setTab]                       = useState('home');
+  const [tab, setTab]                       = useState('search');
   const [selected, setSelected]             = useState(null);
   const [showUpgrade, setShowUpgrade]       = useState(false);
-  const [upgradeFeature, setUpgradeFeature] = useState('Premium Features');
+  const [upgradeFeature] = useState('Premium Features');
   const [scoringBook, setScoringBook]       = useState(null);
   const sessionId = useRef(getSessionId()).current;
-
-  const [userPremium] = useState(() => {
-    try {
-      const user = JSON.parse(localStorage.getItem('ss_user') || '{}');
-      return user.subscription_status === 'active';
-    } catch { return false; }
-  });
 
   useEffect(() => {
     api.logEvent('app_open', { sessionId });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const handleUpgradeNeeded = (feature) => {
-    setUpgradeFeature(feature || 'Premium Features');
-    setShowUpgrade(true);
-  };
 
   const handleSelect = useCallback((book) => {
     setSelected(book);
@@ -1593,15 +1382,6 @@ export default function App() {
       <style>{globalCSS}</style>
       <div className="app-container">
 
-        {tab === 'home' && (
-          <HomeTab
-            onSelect={handleSelect}
-            onRequest={handleRequestScore}
-            onGoSearch={() => setTab('search')}
-            userPremium={userPremium}
-            onUpgradeNeeded={() => handleUpgradeNeeded('Hidden Gems')}
-          />
-        )}
         {tab === 'search' && (
           <SearchTab
             onSelect={handleSelect}
@@ -1612,14 +1392,14 @@ export default function App() {
         {tab === 'library' && (
           <PlaceholderTab
             label="Library"
-            IconComp={Icons.Library}
+            iconComp={Icons.Library}
             description="Save and organize your favorite reads. Your personal collection lives here."
           />
         )}
-        {tab === 'profile' && (
+        {tab === 'settings' && (
           <PlaceholderTab
             label="Profile"
-            IconComp={Icons.Profile}
+            iconComp={Icons.Profile}
             description="Your reading stats, preferences, and scoring history will appear here."
           />
         )}
@@ -1651,7 +1431,14 @@ export default function App() {
             book={scoringBook}
             sessionId={sessionId}
             onClose={() => setScoringBook(null)}
-            onScored={() => setScoringBook(null)}
+            onScored={(result, scoredBook) => {
+              setScoringBook(null);
+              if (scoredBook) {
+                setSelected(scoredBook);
+              } else if (result?.book_id) {
+                fetch(`/api/books/${result.book_id}`).then((r) => r.json()).then((b) => { if (b?.id) setSelected(b); }).catch(() => {});
+              }
+            }}
           />
         )}
 

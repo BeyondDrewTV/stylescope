@@ -8,7 +8,16 @@ Jobs are persisted to SQLite for durability and can be polled by the frontend.
 import uuid
 import json
 import datetime
+import os
+import sqlite3
 from typing import Optional, Dict, Any
+
+
+def _get_conn():
+    db_path = os.getenv("DB_PATH", "stylescope.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def _row_to_dict(row) -> Dict[str, Any]:
@@ -45,12 +54,10 @@ def create_on_demand_job(
     Returns:
         job_id (UUID string)
     """
-    from api import get_conn
-    
     job_id = str(uuid.uuid4())
     now = datetime.datetime.utcnow().isoformat()
 
-    conn = get_conn()
+    conn = _get_conn()
     c = conn.cursor()
     c.execute(
         """
@@ -78,9 +85,7 @@ def get_on_demand_job(job_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Job dict or None if not found
     """
-    from api import get_conn
-    
-    conn = get_conn()
+    conn = _get_conn()
     c = conn.cursor()
     c.execute(
         """
@@ -115,12 +120,10 @@ def update_on_demand_job_status(
         result: Optional scoring result dict
         error_message: Optional error message
     """
-    from api import get_conn
-    
     now = datetime.datetime.utcnow().isoformat()
     result_json = json.dumps(result) if result is not None else None
 
-    conn = get_conn()
+    conn = _get_conn()
     c = conn.cursor()
     c.execute(
         """
