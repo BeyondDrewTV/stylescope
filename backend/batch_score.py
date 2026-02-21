@@ -18,12 +18,13 @@ import argparse
 import sys
 import time
 import logging
-from datetime import datetime
 from typing import Optional
 
-from backend.api import get_conn, _safe_int
+from backend.api import get_conn
 from backend import scorer
+from backend.scorer import extract_content_warnings_llm
 from backend.book_context import fetch_book_context  # NEW: hybrid context pipeline
+from backend.books_upsert import upsert_scored_book  # shared upsert logic
 
 # Configure logging
 logging.basicConfig(
@@ -87,25 +88,26 @@ def extract_spice_level(context_text: str) -> int:
     return 0
 
 
-def extract_content_warnings(context_text: str) -> list[str]:
+def extract_content_warnings_keyword(context_text: str) -> list[str]:
     """
-    Extract content warnings from context text.
-
-    Returns list of warning strings.
+    Keyword-based content warning fallback.
+    Used only if the LLM call fails.
     """
     text = context_text.lower()
     warnings: list[str] = []
 
     warning_keywords = {
         "violence": ["violence", "violent", "graphic violence"],
-        "sexual assault": ["sexual assault", "rape", "non-con", "sa"],
+        "non-consent / rape": ["sexual assault", "rape", "non-con", "nonconsensual"],
         "dubious consent": ["dubcon", "dubious consent", "dub-con"],
         "abuse": ["abuse", "abusive", "domestic violence"],
         "self-harm": ["self harm", "self-harm", "cutting"],
-        "suicide": ["suicide", "suicidal"],
-        "drug use": ["drug use", "drugs", "addiction"],
-        "death": ["major character death", "mcd"],
-        "cheating": ["cheating", "infidelity"],
+        "suicide / suicidal ideation": ["suicide", "suicidal"],
+        "drug use / addiction": ["drug use", "addiction"],
+        "death of a loved one": ["major character death", "mcd"],
+        "cheating / infidelity": ["cheating", "infidelity"],
+        "stalking": ["stalking", "stalker"],
+        "kidnapping / captivity": ["kidnapping", "kidnapped", "captive", "captivity"],
     }
 
     for warning, keywords in warning_keywords.items():
@@ -190,76 +192,76 @@ def score_single_book(book: dict, delay: float = 2.0) -> tuple[bool, Optional[st
         )
 
         scoring_status = scores.get("scoring_status", "unknown")
-        
+
         # Check for errors or rate limiting
         if scoring_status == "error":
             error_msg = scores.get("flags", ["Unknown error"])[0]
             logger.warning(f" Scoring failed (error): {error_msg}")
             return False, error_msg
-        
+
         if scoring_status == "temporarily_unavailable":
-            # Rate limit - treat as retriable
             logger.warning(f" Scoring failed (rate limited): OpenRouter 429")
             return False, "Rate limited by OpenRouter, retry later"
 
-        # Step 3: Extract metadata from context (only if we have reviews)
-        # Don't extract warnings/spice from description alone — too much hallucination risk
+        # Bug 4 fix: guard against None overall_score slipping through
+        overall_score = scores.get("overall_score")
+        if overall_score is None:
+            logger.warning(f" Scoring returned no overall_score (status={scoring_status})")
+            return False, f"No overall_score returned (status={scoring_status})"
+
+        # Step 3: Extract spice level from context keywords (description + reviews)
         spice_level = 0
-        content_warnings = []
         if review_count > 0:
             spice_level = extract_spice_level(context_text)
-            content_warnings = extract_content_warnings(context_text)
 
-        # Step 4: Update database
-        conn = get_conn()
-        c = conn.cursor()
+        # Step 3b: Extract content warnings via LLM (works on description alone too).
+        # Falls back to keyword extraction if LLM call fails.
+        import json as _json
+        cw_result = extract_content_warnings_llm(
+            title=title,
+            author=author,
+            context_text=context_text,
+        )
+        official_warnings = cw_result.get("warnings") or []
+        if not official_warnings and "error" in cw_result:
+            # LLM failed — fall back to keyword extraction
+            logger.warning(f" LLM CW extraction failed: {cw_result['error']} — using keyword fallback")
+            official_warnings = extract_content_warnings_keyword(context_text)
 
-        dimension_scores = scores.get("scores", {})
-        overall_score = scores.get("overall_score")
+        # officialContentWarnings JSON doc (same schema as backfill_official_warnings.py)
+        official_cw_doc = None
+        if official_warnings:
+            official_cw_doc = _json.dumps({
+                "source": cw_result.get("source", "llm_inferred"),
+                "warnings": official_warnings,
+                "confidence": cw_result.get("confidence"),
+                "reasoning": cw_result.get("reasoning", ""),
+            })
 
+        # Derive confidence label for logging (upsert_scored_book computes it internally too)
         confidence_val = scores.get("confidence", 50)
         confidence_label = (
             "high" if confidence_val >= 70 else "medium" if confidence_val >= 40 else "low"
         )
 
-        c.execute(
-            """
-            UPDATE books
-            SET qualityScore = ?,
-                technicalQuality = ?,   -- maps from grammar
-                proseStyle = ?,         -- maps from prose
-                pacing = ?,             -- maps from pacing
-                readability = ?,        -- maps from readability
-                craftExecution = ?,     -- maps from polish
-                confidenceLevel = ?,
-                voteCount = ?,          -- reuse as "review/ratings count" proxy
-                spiceLevel = ?,
-                contentWarnings = ?,
-                seriesName = COALESCE(seriesName, ?),
-                seriesNumber = COALESCE(seriesNumber, ?),
-                scoredDate = ?
-            WHERE id = ?
-            """,
-            (
-                overall_score,
-                dimension_scores.get("grammar", 0),
-                dimension_scores.get("prose", 0),
-                dimension_scores.get("pacing", 0),
-                dimension_scores.get("readability", 0),
-                dimension_scores.get("polish", 0),
-                confidence_label,
-                review_count,
-                spice_level,
-                str(content_warnings) if content_warnings else None,
-                series_info["seriesName"],
-                series_info["seriesNumber"],
-                datetime.now().isoformat(),
-                book_id,
-            ),
-        )
-
-        conn.commit()
-        conn.close()
+        # Step 4: Upsert into books table via shared module (same path as on-demand)
+        # upsert_scored_book handles: scores, CWs, context_source, first/last_scored_at,
+        # times_requested, and preserves any existing human-entered data (genres, goodreadsUrl).
+        conn = get_conn()
+        try:
+            upsert_scored_book(
+                conn=conn,
+                title=title,
+                author=author,
+                isbn=book.get("isbn") or None,
+                scores=scores,
+                ctx=ctx,
+                official_cw_doc=official_cw_doc,
+                spice_level=spice_level,
+                increment_requested=False,  # batch run, not a user request
+            )
+        finally:
+            conn.close()
 
         # Success output
         logger.info(
@@ -273,8 +275,8 @@ def score_single_book(book: dict, delay: float = 2.0) -> tuple[bool, Optional[st
             )
         if spice_level > 0:
             logger.info(f" Spice: {spice_level}/6")
-        if content_warnings:
-            logger.info(f" Warnings: {', '.join(content_warnings)}")
+        if official_warnings:
+            logger.info(f" Content warnings ({cw_result.get('source', '?')}): {', '.join(official_warnings)}")
 
         # Rate limiting delay
         if delay > 0:

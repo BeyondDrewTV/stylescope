@@ -207,6 +207,150 @@ def _parse_llm_response(text: str) -> dict | None:
     }
 
 
+CW_PROMPT_TEMPLATE = """
+You are a content warning specialist for romance and dark romance novels. Your job is to identify content warnings that readers in this genre need to know about before picking up a book.
+
+You will be given a description and optional review excerpts for a book. Based ONLY on what is explicitly stated or clearly implied in this context, list any applicable content warnings.
+
+## CONTENT WARNING CATEGORIES
+
+Choose ONLY from this list. Do not invent new categories.
+
+**Violence & Safety**
+- graphic violence
+- torture
+- kidnapping / captivity
+- stalking
+- murder
+
+**Sexual Content**
+- explicit sexual content
+- dubious consent
+- non-consent / rape
+- forced seduction
+- age gap (significant)
+- student/teacher
+- forbidden relationship
+
+**Dark Romance Tropes**
+- dark romance (general)
+- villain / morally grey love interest
+- mafia / organized crime
+- bully romance
+- enemies to lovers (extreme)
+
+**Mental Health & Trauma**
+- suicide / suicidal ideation
+- self-harm
+- abuse (emotional, physical, or sexual)
+- trauma / PTSD
+- mental illness
+
+**Other**
+- cheating / infidelity
+- death of a loved one
+- drug use / addiction
+- pregnancy
+- revenge plot
+- power imbalance
+
+## RULES
+
+1. Only list warnings that are CLEARLY supported by the context. Do not guess.
+2. If the description/reviews are vague and you cannot confirm a warning, omit it.
+3. For dark romance books, "dark romance (general)" is appropriate if the tone is explicit but specifics are unclear.
+4. List between 0 and 10 warnings maximum.
+
+## OUTPUT FORMAT
+
+Return ONLY valid JSON with no markdown, no code fences, no commentary:
+
+{{
+  "warnings": ["warning 1", "warning 2"],
+  "confidence": 75,
+  "reasoning": "Brief explanation of why these warnings were chosen."
+}}
+
+---
+
+Book: {title} by {author}
+
+CONTEXT:
+{context}
+"""
+
+
+def extract_content_warnings_llm(
+    title: str,
+    author: str,
+    context_text: str,
+) -> dict:
+    """
+    Use the LLM to extract content warnings from book description + reviews.
+
+    Returns:
+        {
+            "warnings": list[str],   # content warning strings
+            "confidence": int,       # 0-100
+            "source": "llm_inferred",
+            "reasoning": str,
+        }
+    On failure, returns {"warnings": [], "source": "llm_inferred", "error": str}.
+    """
+    if not OPENROUTER_API_KEY:
+        return {"warnings": [], "source": "llm_inferred", "error": "no_api_key"}
+
+    if not context_text or len(context_text.strip()) < 50:
+        return {"warnings": [], "source": "llm_inferred", "error": "insufficient_context"}
+
+    # Truncate context to keep CW call cheap (descriptions + a few reviews is enough)
+    context_truncated = context_text[:3000]
+
+    prompt = CW_PROMPT_TEMPLATE.format(
+        title=title,
+        author=author,
+        context=context_truncated,
+    )
+
+    try:
+        logger.info(f"extract_content_warnings_llm: calling OpenRouter for '{title}'")
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://stylescope.app",
+                "X-Title": "StyleScope",
+            },
+            data=json.dumps({
+                "model": OPENROUTER_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+            }),
+            timeout=30,
+        )
+        response.raise_for_status()
+        raw_text = response.json()["choices"][0]["message"]["content"]
+        parsed = _parse_llm_response(raw_text)
+
+        if not parsed or not isinstance(parsed.get("warnings"), list):
+            raise ValueError("LLM response missing 'warnings' list")
+
+        warnings = [str(w).strip() for w in parsed["warnings"] if w and str(w).strip()]
+        logger.info(
+            f"extract_content_warnings_llm: '{title}' → {len(warnings)} warnings: {warnings}"
+        )
+        return {
+            "warnings": warnings,
+            "confidence": parsed.get("confidence", 50),
+            "source": "llm_inferred",
+            "reasoning": parsed.get("reasoning", ""),
+        }
+
+    except Exception as e:
+        logger.warning(f"extract_content_warnings_llm failed for '{title}': {e}")
+        return {"warnings": [], "source": "llm_inferred", "error": str(e)}
+
+
 def score_book(
     title: str,
     author: str,

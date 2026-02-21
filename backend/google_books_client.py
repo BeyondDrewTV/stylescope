@@ -12,6 +12,24 @@ import re
 import time
 from typing import Optional, Dict, Any, List
 
+def _author_matches(author_lower: str, author_last: str, item_authors_joined: str) -> tuple[bool, int]:
+    """
+    Check if an author string matches item authors.
+    Returns (matched: bool, score_bonus: int).
+    Uses word-boundary regex to avoid 'nora' matching inside 'eleanor'.
+    """
+    if not author_lower:
+        return False, 0
+    # Full name match
+    for part in item_authors_joined.split(","):
+        part = part.strip()
+        if author_lower in part or part in author_lower:
+            return True, 3
+    # Last name word-boundary match
+    if author_last and re.search(r'\b' + re.escape(author_last) + r'\b', item_authors_joined):
+        return True, 2
+    return False, 0
+
 import requests
 
 logger = logging.getLogger(__name__)
@@ -115,8 +133,8 @@ def fetch_google_book(
         logger.info(f"Google Books: searching '{query}'")
         items = _search_google_books(query, max_results=5)
 
-    # Strategy 3: Title only (broader)
-    if not items and title:
+    # Strategy 3: Title only (broader) — only when no author is known
+    if not items and title and not author:
         logger.info(f"Google Books: broad title search '{title}'")
         items = _search_google_books(title.strip(), max_results=5)
 
@@ -130,12 +148,19 @@ def fetch_google_book(
     title_lower = (title or "").lower().strip()
     author_lower = (author or "").lower().strip()
 
+    # Build last-name token for looser author matching (e.g. "darling" from "Giana Darling")
+    author_last = author_lower.split()[-1] if author_lower else ""
+
     for item in items:
         vol = item.get("volumeInfo", {})
         item_title = (vol.get("title") or "").lower()
-        item_authors = [a.lower() for a in (vol.get("authors") or [])]
+        item_authors_raw = vol.get("authors") or []
+        item_authors = [a.lower() for a in item_authors_raw]
+        item_authors_joined = " ".join(item_authors)
 
         score = 0
+        author_matched = False
+
         # Title matching
         if title_lower and title_lower == item_title:
             score += 3
@@ -144,19 +169,19 @@ def fetch_google_book(
         elif title_lower and item_title in title_lower:
             score += 1
 
-        # Author matching
+        # Author matching — word-boundary safe
         if author_lower:
-            for a in item_authors:
-                if author_lower in a or a in author_lower:
-                    score += 2
-                    break
+            matched, bonus = _author_matches(author_lower, author_last, item_authors_joined)
+            if matched:
+                score += bonus
+                author_matched = True
 
         # Prefer items with descriptions
         if vol.get("description"):
             score += 1
 
-        # Prefer items with more ratings
-        score += min((vol.get("ratingsCount") or 0) / 100, 2)
+        # Prefer items with more ratings (capped contribution)
+        score += min((vol.get("ratingsCount") or 0) / 1000, 1)
 
         if score > best_score:
             best_score = score
@@ -164,6 +189,21 @@ def fetch_google_book(
 
     if not best:
         return None
+
+    # Reject the match if we have an author and it didn't match at all
+    # (prevents cross-author false positives like Darling→Lark)
+    if author_lower:
+        vol = best.get("volumeInfo", {})
+        item_authors_joined = " ".join(
+            a.lower() for a in (vol.get("authors") or [])
+        )
+        matched, _ = _author_matches(author_lower, author_last, item_authors_joined)
+        if not matched:
+            logger.warning(
+                f"Google Books: best match author '{item_authors_joined}' "
+                f"doesn't match '{author}' — discarding"
+            )
+            return None
 
     result = _normalize_item(best)
     isbns = _extract_isbns(best)

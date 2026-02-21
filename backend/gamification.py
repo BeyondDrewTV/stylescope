@@ -2,9 +2,18 @@
 Pepper's Universe — Gamification Backend
 Flask Blueprint for points, achievements, streaks, biomes, and anonymous user identity.
 
-Registered in api.py:
-    from backend.gamification import gamification_bp, init_gamification_db
-    app.register_blueprint(gamification_bp)
+NOTE: Gamification is DISABLED in v1. The blueprint is NOT registered in api.py.
+Do not rely on these endpoints in production yet.
+
+To re-enable (when Pepper's Universe is added back):
+    In api.py, uncomment:
+        from backend.gamification import gamification_bp, init_gamification_db
+        app.register_blueprint(gamification_bp)
+    In frontend/src/main.jsx, restore:
+        GameProvider, BiomeShell, GameToasts wrappers
+
+All tables (game_state, anon_users, achievements, lore_discoveries) are still
+created by init_gamification_db() and preserved for future use.
 """
 
 import json

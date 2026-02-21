@@ -57,8 +57,12 @@ from backend.quizzes import (
     PERSONALITY_QUESTIONS,
     score_personality,
 )
-from backend.gamification import gamification_bp, init_gamification_db
+# NOTE: gamification_bp intentionally NOT imported or registered in v1.
+# The module (backend/gamification.py) and its tables are preserved for future use.
+# To re-enable: uncomment the two lines below and the register_blueprint call.
+# from backend.gamification import gamification_bp, init_gamification_db
 from backend.book_context import fetch_book_context
+from backend.books_upsert import upsert_scored_book, ensure_schema as _ensure_books_schema
 from backend.jobs import (
     create_on_demand_job,
     get_on_demand_job,
@@ -68,7 +72,7 @@ from backend.jobs import (
 
 app = Flask(__name__)
 CORS(app)
-app.register_blueprint(gamification_bp)
+# app.register_blueprint(gamification_bp)  # disabled v1 — re-enable with gamification
 
 # ------------
 # Configuration
@@ -165,12 +169,18 @@ def init_db():
 
     # Idempotent column additions for existing databases
     for col, definition in [
-        ("seriesName",       "TEXT"),
-        ("seriesNumber",     "INTEGER"),
-        ("seriesTotal",      "INTEGER"),
-        ("seriesIsComplete", "INTEGER DEFAULT 0"),
-        ("search_normalized", "TEXT"),
+        ("seriesName",            "TEXT"),
+        ("seriesNumber",          "INTEGER"),
+        ("seriesTotal",           "INTEGER"),
+        ("seriesIsComplete",      "INTEGER DEFAULT 0"),
+        ("search_normalized",     "TEXT"),
         ("officialContentWarnings", "TEXT"),
+        # v1 additions — scoring transparency + usage analytics
+        ("scoring_status",        "TEXT"),
+        ("context_source",        "TEXT"),
+        ("first_scored_at",       "TEXT"),
+        ("last_scored_at",        "TEXT"),
+        ("times_requested",       "INTEGER DEFAULT 0"),
     ]:
         try:
             c.execute(f"ALTER TABLE books ADD COLUMN {col} {definition}")
@@ -276,6 +286,37 @@ def init_db():
         )
     """)
 
+    # -- On-demand usage tracking (soft cap per user/month) ------------------
+    # user_key: user_id if logged in, else IP-derived anon key
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS on_demand_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_key TEXT NOT NULL,
+            year_month TEXT NOT NULL,
+            count INTEGER DEFAULT 0,
+            UNIQUE(user_key, year_month)
+        )
+    """)
+
+    # -- Analytics events (vendor-agnostic, append-only) ---------------------
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS analytics_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            event TEXT NOT NULL,
+            user_key TEXT,
+            session_id TEXT,
+            properties TEXT
+        )
+    """)
+    # Index for common queries: per-user event counts, per-event time series
+    c.execute("CREATE INDEX IF NOT EXISTS idx_analytics_event ON analytics_events(event)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_analytics_user  ON analytics_events(user_key)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_analytics_ts    ON analytics_events(ts)")
+
+    # Ensure books_upsert schema additions (scoring_status, context_source, etc.)
+    _ensure_books_schema(conn)
+
     conn.commit()
     conn.close()
 
@@ -283,6 +324,111 @@ def init_db():
 # ---------------------------------------------------------------------------
 # Migration helpers
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# On-demand scoring: soft cap config
+# ---------------------------------------------------------------------------
+# Change this number whenever you want to raise/lower the free monthly limit.
+# Logged-in users and anon users share the same limit for now.
+ON_DEMAND_MONTHLY_CAP = int(os.environ.get("ON_DEMAND_MONTHLY_CAP", "10"))
+
+
+def _get_user_key(user_id: str | None, request_obj) -> str:
+    """
+    Derive a stable per-user key for usage tracking.
+    Logged-in users  → "u:{user_id}"
+    Anonymous users  → "ip:{ip_address}"
+    This is intentionally coarse for v1 — easy to tighten later.
+    """
+    if user_id:
+        return f"u:{user_id}"
+    ip = (
+        request_obj.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or request_obj.remote_addr
+        or "unknown"
+    )
+    return f"ip:{ip}"
+
+
+def _check_and_increment_usage(user_key: str) -> tuple[bool, int]:
+    """
+    Check whether user_key is under the monthly cap, then increment.
+
+    Returns (allowed: bool, new_count: int).
+    If allowed is False the count is NOT incremented.
+    """
+    from datetime import datetime
+    year_month = datetime.utcnow().strftime("%Y-%m")
+    conn = get_conn()
+    try:
+        c = conn.cursor()
+        # Upsert: create row if missing, then read current count
+        c.execute("""
+            INSERT INTO on_demand_usage (user_key, year_month, count)
+            VALUES (?, ?, 0)
+            ON CONFLICT(user_key, year_month) DO NOTHING
+        """, (user_key, year_month))
+        conn.commit()
+
+        row = c.execute(
+            "SELECT count FROM on_demand_usage WHERE user_key=? AND year_month=?",
+            (user_key, year_month)
+        ).fetchone()
+        current = row["count"] if row else 0
+
+        if current >= ON_DEMAND_MONTHLY_CAP:
+            return False, current
+
+        c.execute("""
+            UPDATE on_demand_usage SET count = count + 1
+            WHERE user_key=? AND year_month=?
+        """, (user_key, year_month))
+        conn.commit()
+        return True, current + 1
+    finally:
+        conn.close()
+
+
+def _get_usage_count(user_key: str) -> int:
+    """Return how many on-demand scores the user has used this month."""
+    from datetime import datetime
+    year_month = datetime.utcnow().strftime("%Y-%m")
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT count FROM on_demand_usage WHERE user_key=? AND year_month=?",
+            (user_key, year_month)
+        ).fetchone()
+        return row["count"] if row else 0
+    finally:
+        conn.close()
+
+
+def _log_event(event: str, user_key: str | None = None,
+               session_id: str | None = None, properties: dict | None = None):
+    """
+    Append an analytics event (fire-and-forget, never raises).
+    All events land in analytics_events for future segmentation.
+    """
+    import json as _json
+    from datetime import datetime
+    try:
+        conn = get_conn()
+        conn.execute(
+            "INSERT INTO analytics_events (ts, event, user_key, session_id, properties) VALUES (?,?,?,?,?)",
+            (
+                datetime.utcnow().isoformat(),
+                event,
+                user_key,
+                session_id,
+                _json.dumps(properties) if properties else None,
+            )
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # analytics must never break the main flow
+
 
 def _safe_int(value, default=0):
     """Cast a CSV field to int, returning `default` for blank/invalid values."""
@@ -899,11 +1045,14 @@ def _run_scoring_job(
     title: str,
     author: str,
     user_id: str | None,
+    user_key: str | None = None,
+    session_id: str | None = None,
 ):
     """Background worker for scoring a book on-demand."""
     import logging
+    import json as _json
     logger = logging.getLogger(__name__)
-    
+
     try:
         update_on_demand_job_status(job_id, "running")
         logger.info(f"[JOB {job_id}] Starting scoring: title='{title}', author='{author}', isbn={isbn}")
@@ -913,35 +1062,33 @@ def _run_scoring_job(
         ctx = fetch_book_context(isbn=isbn, title=title, author=author)
         context_text: str = ctx.get("context_text", "") or ""
         meta = ctx.get("meta", {}) or {}
-        review_count = ctx.get("review_count", 0)  # FIX: was looking in meta for review_count_estimate
+        review_count = ctx.get("review_count", 0)
         excerpt_count = ctx.get("excerpt_count", 0)
+        context_source: str = ctx.get("context_source", "description_only")
+        ratings_count_estimate: int = ctx.get("ratings_count_estimate", 0)
 
         logger.info(
             f"[JOB {job_id}] Context fetched: source={meta.get('source')}, "
-            f"context_text_length={len(context_text)}, "
-            f"review_count={review_count}, excerpt_count={excerpt_count}, "
-            f"description_length={meta.get('description_length')}"
+            f"context_source={context_source}, context_text_length={len(context_text)}, "
+            f"review_count={review_count}, ratings_count_estimate={ratings_count_estimate}"
         )
-        logger.debug(f"[JOB {job_id}] Context text preview: {context_text[:300]}...")
 
         if not context_text.strip():
             error_msg = "No context available from data sources"
             logger.warning(f"[JOB {job_id}] {error_msg}")
             update_on_demand_job_status(job_id, "failed", error_message=error_msg)
+            _log_event("on_demand_failed", user_key, session_id,
+                       {"reason": "no_context", "title": title, "author": author})
             return
 
         # 2) Score with existing scorer
-        series = ""  # optional: derive from title if desired
-        genre = "Romance"
-        subgenre = ""
-
         logger.info(f"[JOB {job_id}] Calling scorer.score_book() with review_count={review_count}")
         scores = scorer.score_book(
             title=title,
             author=author,
-            series=series,
-            genre=genre,
-            subgenre=subgenre,
+            series="",
+            genre="Romance",
+            subgenre="",
             context_text=context_text,
             review_count=review_count,
         )
@@ -950,21 +1097,88 @@ def _run_scoring_job(
             error_msg = (scores.get("flags") or ["Unknown error"])[0]
             logger.error(f"[JOB {job_id}] Scoring failed (error): {error_msg}")
             update_on_demand_job_status(job_id, "failed", error_message=error_msg)
-            return
-        
-        if scores.get("scoring_status") == "temporarily_unavailable":
-            error_msg = "Scoring is temporarily busy, please try again in a few minutes."
-            logger.warning(f"[JOB {job_id}] Scoring failed (rate limited): OpenRouter 429")
-            update_on_demand_job_status(job_id, "failed", error_message=error_msg)
+            _log_event("on_demand_failed", user_key, session_id,
+                       {"reason": "scoring_error", "flag": error_msg, "title": title})
             return
 
-        logger.info(f"[JOB {job_id}] Scoring successful: score={scores.get('overall_score')}, confidence={scores.get('confidence')}%")
-        # 3) Persist result into job
+        if scores.get("scoring_status") == "temporarily_unavailable":
+            error_msg = "Scoring is temporarily busy, please try again in a few minutes."
+            logger.warning(f"[JOB {job_id}] Scoring rate-limited (OpenRouter 429)")
+            update_on_demand_job_status(job_id, "failed", error_message=error_msg)
+            _log_event("on_demand_rate_limited", user_key, session_id, {"title": title})
+            return
+
+        logger.info(
+            f"[JOB {job_id}] Scoring OK: score={scores.get('overall_score')}, "
+            f"confidence={scores.get('confidence')}%"
+        )
+
+        # 3) LLM content warnings (same path as batch_score.py)
+        from backend.scorer import extract_content_warnings_llm
+        from backend.batch_score import extract_content_warnings_keyword, extract_spice_level
+
+        spice_level = extract_spice_level(context_text) if review_count > 0 else 0
+
+        cw_result = extract_content_warnings_llm(title=title, author=author, context_text=context_text)
+        official_warnings = cw_result.get("warnings") or []
+        if not official_warnings and "error" in cw_result:
+            logger.warning(f"[JOB {job_id}] LLM CW failed ({cw_result['error']}), using keyword fallback")
+            official_warnings = extract_content_warnings_keyword(context_text)
+
+        official_cw_doc: str | None = None
+        if official_warnings:
+            official_cw_doc = _json.dumps({
+                "source": cw_result.get("source", "llm_inferred"),
+                "warnings": official_warnings,
+                "confidence": cw_result.get("confidence"),
+                "reasoning": cw_result.get("reasoning", ""),
+            })
+
+        # 4) Augment result dict with transparency fields + CWs
+        scores["context_source"] = context_source
+        scores["ratings_count_estimate"] = ratings_count_estimate
+        scores["official_content_warnings"] = official_warnings
+        scores["spice_level"] = spice_level
+
+        # 5) Upsert into books table so future users get the cached result
+        _upsert_conn = get_conn()
+        try:
+            book_id = upsert_scored_book(
+                conn=_upsert_conn,
+                title=title,
+                author=author,
+                isbn=isbn,
+                scores=scores,
+                ctx=ctx,
+                official_cw_doc=official_cw_doc,
+                spice_level=spice_level,
+                increment_requested=True,   # user explicitly triggered this
+            )
+        finally:
+            _upsert_conn.close()
+        if book_id:
+            scores["book_id"] = book_id
+            logger.info(f"[JOB {job_id}] Upserted into books table: book_id={book_id}")
+        else:
+            logger.warning(f"[JOB {job_id}] books upsert returned None — job result still saved")
+
+        # 6) Persist job result + fire analytics
         update_on_demand_job_status(job_id, "completed", result=scores)
+        _log_event("on_demand_completed", user_key, session_id, {
+            "title": title, "author": author,
+            "overall_score": scores.get("overall_score"),
+            "confidence": scores.get("confidence"),
+            "context_source": context_source,
+            "review_count": review_count,
+            "book_id": book_id,
+            "cw_count": len(official_warnings),
+        })
 
     except Exception as e:
         logger.exception(f"[JOB {job_id}] Exception in _run_scoring_job")
         update_on_demand_job_status(job_id, "failed", error_message=str(e))
+        _log_event("on_demand_failed", user_key, session_id,
+                   {"reason": "exception", "error": str(e), "title": title})
 
 
 @app.route("/api/score-on-demand", methods=["POST"])
@@ -973,37 +1187,84 @@ def score_on_demand():
     Start an on-demand scoring job.
 
     Request body:
-        {
-            "title": "Book Title",
-            "author": "Author Name",
-            "isbn": "optional"
-        }
+        { "title": str, "author": str, "isbn": str?, "user_id": str?, "session_id": str? }
 
     Response (202 Accepted):
-        { "job_id": "uuid-string" }
+        { "job_id": str, "usage": { "used": int, "cap": int } }
+
+    Response (429 Too Many Requests — soft cap hit):
+        { "error": "cap_reached", "used": int, "cap": int,
+          "message": "You've used all 10 score slots this month..." }
     """
     data = request.get_json(force=True) or {}
 
     title = (data.get("title") or "").strip()
     author = (data.get("author") or "").strip()
     isbn = (data.get("isbn") or None) or None
-    user_id = data.get("user_id")  # optional
+    user_id = data.get("user_id")
+    session_id = data.get("session_id")
 
     if not title or not author:
         return jsonify({"error": "title and author are required"}), 400
 
+    # Derive stable user key for cap tracking + analytics
+    user_key = _get_user_key(user_id, request)
+
+    # Check whether this book is already scored in books table (skip cap check)
+    conn = get_conn()
+    try:
+        existing = conn.execute(
+            "SELECT id, qualityScore FROM books WHERE title=? AND author=?",
+            (title, author)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if existing and existing["qualityScore"] is not None:
+        # Already scored — return the book directly, no job needed, no cap consumed
+        _log_event("on_demand_cache_hit", user_key, session_id,
+                   {"title": title, "author": author, "book_id": existing["id"]})
+        return jsonify({
+            "status": "already_scored",
+            "book_id": existing["id"],
+            "message": "This book is already in the StyleScope library.",
+        }), 200
+
+    # Enforce monthly soft cap
+    allowed, new_count = _check_and_increment_usage(user_key)
+    if not allowed:
+        _log_event("on_demand_cap_hit", user_key, session_id,
+                   {"title": title, "author": author, "cap": ON_DEMAND_MONTHLY_CAP})
+        return jsonify({
+            "error": "cap_reached",
+            "used": new_count,
+            "cap": ON_DEMAND_MONTHLY_CAP,
+            "message": (
+                f"You've used all {ON_DEMAND_MONTHLY_CAP} score slots for this month. "
+                "We're still in early access, so slots are limited — more coming soon."
+            ),
+        }), 429
+
     job_id = create_on_demand_job(title=title, author=author, isbn=isbn, user_id=user_id)
 
-    # Start background thread
+    _log_event("on_demand_requested", user_key, session_id, {
+        "title": title, "author": author, "isbn": isbn,
+        "usage_this_month": new_count, "cap": ON_DEMAND_MONTHLY_CAP,
+    })
+
+    # Start background thread, passing user_key + session_id for analytics
     t = threading.Thread(
         target=_run_scoring_job,
         args=(job_id, isbn, title, author, user_id),
+        kwargs={"user_key": user_key, "session_id": session_id},
         daemon=True,
     )
     t.start()
 
-    # 202 Accepted since work is async
-    return jsonify({"job_id": job_id}), 202
+    return jsonify({
+        "job_id": job_id,
+        "usage": {"used": new_count, "cap": ON_DEMAND_MONTHLY_CAP},
+    }), 202
 
 
 @app.route("/api/score-on-demand/<job_id>", methods=["GET"])
@@ -1041,6 +1302,34 @@ def get_score_on_demand(job_id: str):
         resp["error_message"] = job["error_message"]
 
     return jsonify(resp), 200
+
+
+# ---------------------------------------------------------------------------
+# Analytics: client-side event ingestion
+# ---------------------------------------------------------------------------
+
+@app.route("/api/analytics/event", methods=["POST"])
+def log_analytics_event():
+    """
+    Lightweight client-side event ingestion.
+    Body: { "event": str, "user_key": str?, "session_id": str?, "properties": {}? }
+    Always returns 204 — never expose errors to client.
+    """
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        event = (data.get("event") or "").strip()
+        if event:
+            user_id = data.get("user_id")
+            user_key = _get_user_key(user_id, request)
+            _log_event(
+                event=event,
+                user_key=user_key,
+                session_id=data.get("session_id"),
+                properties=data.get("properties"),
+            )
+    except Exception:
+        pass
+    return "", 204
 
 
 # ---------------------------------------------------------------------------
@@ -1644,7 +1933,7 @@ def health():
 
 init_db()
 migrate_csv_to_db()
-init_gamification_db()
+# init_gamification_db() — disabled v1; tables preserved but blueprint not registered
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000, host="0.0.0.0")

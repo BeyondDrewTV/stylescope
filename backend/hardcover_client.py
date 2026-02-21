@@ -5,6 +5,9 @@ Primary data source for book metadata and reviews.
 Uses Hardcover's GraphQL API at https://api.hardcover.app/v1/graphql
 
 Docs: https://docs.hardcover.app/api/getting-started/
+
+NOTE: The Hardcover public API does NOT permit _ilike / table-scan queries.
+Only the `search` (Typesense) and `books_by_pk` queries are allowed.
 """
 
 import os
@@ -24,7 +27,11 @@ load_dotenv(_env_path)
 logger = logging.getLogger(__name__)
 
 HARDCOVER_ENDPOINT = "https://api.hardcover.app/v1/graphql"
-HARDCOVER_API_KEY = os.getenv("HARDCOVER_API_KEY")
+
+# Strip any "Bearer " prefix the user may have included in the .env value
+# so we never send "Bearer Bearer <token>" in the Authorization header.
+_raw_hc_key = os.getenv("HARDCOVER_API_KEY") or ""
+HARDCOVER_API_KEY = _raw_hc_key.removeprefix("Bearer ").strip() or None
 
 
 class HardcoverError(Exception):
@@ -40,10 +47,14 @@ def _hc_request(query: str, variables: dict, retries: int = 2) -> dict:
     if not HARDCOVER_API_KEY:
         raise HardcoverError("HARDCOVER_API_KEY not set in environment")
 
+    # Log a short token preview on first use to confirm prefix stripping worked
+    _preview = HARDCOVER_API_KEY[:20] + "..." if len(HARDCOVER_API_KEY) > 20 else HARDCOVER_API_KEY
+    logger.debug(f"Hardcover auth token preview (should NOT start with 'Bearer'): {_preview}")
+
     headers = {
-    "Authorization": HARDCOVER_API_KEY,
-    "Content-Type": "application/json",
-}
+        "authorization": f"Bearer {HARDCOVER_API_KEY}",
+        "content-type": "application/json",
+    }
     last_err = None
     for attempt in range(1, retries + 1):
         try:
@@ -95,7 +106,7 @@ query SearchBooks($query: String!) {
 """
 
 # ---------------------------------------------------------------------------
-# Book detail query — fetches full data by book ID
+# Book detail query — fetches full data by book ID (used for reviews)
 # ---------------------------------------------------------------------------
 
 BOOK_DETAIL_QUERY = """
@@ -126,41 +137,8 @@ query BookDetail($id: Int!) {
 }
 """
 
-# ---------------------------------------------------------------------------
-# Books by title query — direct table lookup
-# ---------------------------------------------------------------------------
-
-BOOKS_BY_TITLE_QUERY = """
-query BooksByTitle($title: String!) {
-  books(
-    where: { title: { _ilike: $title } }
-    limit: 5
-    order_by: { users_count: desc }
-  ) {
-    id
-    title
-    slug
-    description
-    pages
-    release_date
-    rating
-    ratings_count
-    users_read_count
-    users_count
-    cached_tags
-    cached_contributors
-    contributions {
-      author {
-        name
-      }
-    }
-    editions {
-      isbn_10
-      isbn_13
-    }
-  }
-}
-"""
+# NOTE: BOOKS_BY_TITLE_QUERY (_ilike) has been removed — the Hardcover public
+# API returns 403 for _ilike / table-scan operations. Use SEARCH_QUERY only.
 
 # ---------------------------------------------------------------------------
 # User reviews for a book — fetches community reviews
@@ -270,7 +248,7 @@ def _extract_genres(book: dict) -> List[str]:
 
 
 def _normalize_book(raw: dict) -> Dict[str, Any]:
-    """Normalize a raw Hardcover book object into a clean dict."""
+    """Normalize a raw Hardcover book object (from books_by_pk) into a clean dict."""
     isbns = _extract_isbns(raw)
     return {
         "id": raw.get("id"),
@@ -291,70 +269,100 @@ def _normalize_book(raw: dict) -> Dict[str, Any]:
     }
 
 
+def _normalize_search_doc(doc: dict) -> Dict[str, Any]:
+    """
+    Normalize a Typesense search hit document into the same shape as _normalize_book.
+
+    The search document has a different structure from books_by_pk:
+      - authors are in doc["author_names"] (list of strings)
+      - genres are in doc["genres"] (list of strings)
+      - isbns are in doc["isbns"] (flat list, mix of isbn10/isbn13)
+      - description is in doc["description"]
+      - id is a string, not int
+    """
+    # Extract authors from contributions (preferred) or author_names fallback
+    authors: List[str] = []
+    for c in (doc.get("contributions") or []):
+        name = (c.get("author") or {}).get("name")
+        if name:
+            authors.append(name)
+    if not authors:
+        authors = [a for a in (doc.get("author_names") or []) if a]
+
+    # Extract ISBNs from flat isbns list
+    isbn10: Optional[str] = None
+    isbn13: Optional[str] = None
+    for raw_isbn in (doc.get("isbns") or []):
+        s = str(raw_isbn).strip().replace("-", "")
+        if len(s) == 13 and not isbn13:
+            isbn13 = s
+        elif len(s) == 10 and not isbn10:
+            isbn10 = s
+
+    genres = [g for g in (doc.get("genres") or []) if g]
+
+    # id comes as string from Typesense
+    raw_id = doc.get("id")
+    book_id: Optional[int] = None
+    try:
+        book_id = int(raw_id) if raw_id is not None else None
+    except (TypeError, ValueError):
+        pass
+
+    return {
+        "id": book_id,
+        "title": doc.get("title", ""),
+        "slug": doc.get("slug"),
+        "description": doc.get("description"),
+        "authors": authors,
+        "isbn10": isbn10,
+        "isbn13": isbn13,
+        "pages": doc.get("pages"),
+        "release_date": doc.get("release_date"),
+        "average_rating": doc.get("rating"),
+        "ratings_count": doc.get("ratings_count"),
+        "users_read_count": doc.get("users_read_count"),
+        "users_count": doc.get("users_count"),
+        "genres": genres[:10],
+        "reviews": [],
+    }
+
+
 def search_books(title: str, author: str = "") -> List[Dict[str, Any]]:
     """
     Search Hardcover for books matching title (and optionally author).
     Returns normalized book dicts, best matches first.
-    Uses multiple fallback strategies to find books.
+
+    Uses Typesense search (the only permitted query type on the public API).
+    Results are normalized directly from the search document — no extra
+    books_by_pk round-trips needed at this stage.
     """
-    # Strategy 1: Direct title query with LIKE matching (MOST RELIABLE)
-    logger.info(f"Hardcover search: trying title query for '{title}'")
-    try:
-        data = _hc_request(BOOKS_BY_TITLE_QUERY, {"title": f"%{title}%"})
-        books = data.get("books") or []
-        if books:
-            normalized = [_normalize_book(b) for b in books]
-            logger.info(f"Title query found {len(normalized)} results")
-            return normalized
-        else:
-            logger.debug(f"Title query returned empty books list")
-    except HardcoverError as e:
-        logger.warning(f"Title query failed: {e}")
-
-    # Strategy 2: Try title + author together
-    if author.strip():
-        logger.info(f"Hardcover search: trying title+author query")
-        try:
-            # Search for title that matches and filter by approximate author
-            data = _hc_request(BOOKS_BY_TITLE_QUERY, {"title": f"%{title}%"})
-            books = data.get("books") or []
-            if books:
-                # Return all matches - caller will pick best match
-                normalized = [_normalize_book(b) for b in books]
-                logger.info(f"Title+author query found {len(normalized)} results")
-                return normalized
-        except HardcoverError as e:
-            logger.warning(f"Title+author query failed: {e}")
-
-    # Strategy 3: Try Typesense search (if it works better for your API)
-    logger.info(f"Hardcover search: trying Typesense search")
     search_term = f"{title} {author}".strip() if author.strip() else title.strip()
+    logger.info(f"Hardcover search: Typesense query '{search_term}'")
+
     try:
         data = _hc_request(SEARCH_QUERY, {"query": search_term})
-        logger.debug(f"Typesense search response: {data}")
-        results = data.get("search", {}).get("results") or []
-        if results and isinstance(results, list):
-            logger.info(f"Typesense search found {len(results)} results")
-            books = []
-            for hit in results:
-                doc = hit if isinstance(hit, dict) else {}
-                if "document" in doc:
-                    doc = doc["document"]
-                book_id = doc.get("id")
-                if book_id:
-                    try:
-                        detail = _hc_request(BOOK_DETAIL_QUERY, {"id": int(book_id)})
-                        book_data = detail.get("books_by_pk")
-                        if book_data:
-                            books.append(_normalize_book(book_data))
-                    except HardcoverError:
-                        continue
-            if books:
-                return books
-    except HardcoverError as e:
-        logger.warning(f"Typesense search failed: {e}")
+        # results is a dict: {"hits": [...], "found": N, ...}
+        results = data.get("search", {}).get("results") or {}
+        hits = results.get("hits") or [] if isinstance(results, dict) else []
 
-    logger.warning(f"All search strategies failed for '{title}'")
+        if not hits:
+            logger.info(f"Hardcover Typesense: no hits for '{search_term}'")
+            return []
+
+        logger.info(f"Hardcover Typesense: {len(hits)} hits")
+        books = []
+        for hit in hits:
+            doc = hit.get("document") if isinstance(hit, dict) else {}
+            if doc:
+                books.append(_normalize_search_doc(doc))
+
+        return books
+
+    except HardcoverError as e:
+        logger.warning(f"Hardcover Typesense search failed: {e}")
+
+    logger.warning(f"Hardcover search failed for '{title}'")
     return []
 
 
@@ -410,15 +418,38 @@ def fetch_hardcover_book(
         logger.info("No Hardcover results found")
         return None
 
-    # Pick best candidate (already sorted by match quality)
+    # Pick best candidate: prefer author match over first result
     best = candidates[0]
+    if search_author.strip():
+        author_last = search_author.strip().lower().split()[-1]
+        for candidate in candidates:
+            candidate_authors = " ".join(a.lower() for a in candidate.get("authors", []))
+            if re.search(r'\b' + re.escape(author_last) + r'\b', candidate_authors):
+                best = candidate
+                break
     logger.info(
         f"Hardcover match: '{best['title']}' by {', '.join(best['authors'])} "
         f"| id={best['id']} | ratings={best.get('ratings_count', 0)}"
     )
 
-    # Fetch reviews for the best match
+    # Fetch full detail (description + reviews) for the best match via books_by_pk.
+    # The search document may lack a description; books_by_pk always has it.
     if best.get("id"):
+        try:
+            detail_data = _hc_request(BOOK_DETAIL_QUERY, {"id": int(best["id"])})
+            book_detail = detail_data.get("books_by_pk")
+            if book_detail:
+                # Merge detail fields into best (description, isbn, genres, etc.)
+                detailed = _normalize_book(book_detail)
+                # Prefer detail values over search-doc values where available
+                for field in ("description", "isbn10", "isbn13", "genres", "pages",
+                              "release_date", "average_rating", "ratings_count",
+                              "users_read_count", "users_count"):
+                    if detailed.get(field) is not None:
+                        best[field] = detailed[field]
+        except HardcoverError as e:
+            logger.warning(f"Could not fetch detail for book id={best['id']}: {e}")
+
         reviews = fetch_reviews(best["id"])
         best["reviews"] = reviews
         logger.info(f"Fetched {len(reviews)} Hardcover reviews")

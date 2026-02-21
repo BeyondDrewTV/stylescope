@@ -92,15 +92,22 @@ export const api = {
     fetch(`${API_BASE}/spice-levels`).then(handleResponse),
 
   // ── Scoring ─────────────────────────────────────────────────────────────
-  requestScore: (title, author) =>
+  requestScore: (title, author, { isbn, userId, sessionId } = {}) =>
     fetch(`${API_BASE}/score-on-demand`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, author }),
+      body: JSON.stringify({
+        title,
+        author,
+        isbn: isbn || undefined,
+        user_id: userId || undefined,
+        session_id: sessionId || undefined,
+      }),
     }).then(handleResponse),
 
+  // Fixed: was /api/job-status/{id} (404) — correct endpoint is /api/score-on-demand/{id}
   getJobStatus: (jobId) =>
-    fetch(`${API_BASE}/job-status/${jobId}`).then(handleResponse),
+    fetch(`${API_BASE}/score-on-demand/${jobId}`).then(handleResponse),
 
   // ── Series ──────────────────────────────────────────────────────────────
   getSeriesInfo: (bookId) =>
@@ -121,28 +128,14 @@ export const api = {
       body: JSON.stringify({ email, plan }),
     }).then(handleResponse),
 
-  // ── Gamification ─────────────────────────────────────────────────────
-  getGameSession: (uuid) =>
-    fetch(`${API_BASE}/game/session?uuid=${encodeURIComponent(uuid)}`).then(handleResponse),
-
-  sendGameEvent: (uuid, eventType, meta = {}) =>
-    fetch(`${API_BASE}/game/event`, {
+  // ── Analytics ────────────────────────────────────────────────────────
+  // Fire-and-forget: never awaited, never shown to user.
+  // sessionId should be a stable UUID generated once per app session.
+  logEvent: (event, { userId, sessionId, properties } = {}) => {
+    fetch(`${API_BASE}/analytics/event`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uuid, event_type: eventType, ...meta }),
-    }).then(handleResponse),
-
-  setActiveBiome: (uuid, biomeId) =>
-    fetch(`${API_BASE}/game/biome`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uuid, biome_id: biomeId }),
-    }).then(handleResponse),
-
-  linkGameAccount: (uuid, userId) =>
-    fetch(`${API_BASE}/game/link-account`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uuid, user_id: userId }),
-    }).then(handleResponse),
+      body: JSON.stringify({ event, user_id: userId, session_id: sessionId, properties }),
+    }).catch(() => {}); // silent — analytics must never crash the app
+  },
 };

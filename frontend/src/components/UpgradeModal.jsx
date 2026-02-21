@@ -1,27 +1,24 @@
-import { useState } from 'react';
+/**
+ * UpgradeModal — v1 stub.
+ *
+ * Full premium upsell (biomes, advanced filters, unlimited scoring) is deferred.
+ * This placeholder accepts the same props as the original so call sites don't crash,
+ * and shows a lightweight "coming soon" message instead.
+ *
+ * Restore the full modal here when paid tiers launch.
+ */
 
 const C = {
-  purple: '#C77DFF',
-  pink: '#FF6B9D',
-  bg: '#0a0118',
-  cardBg: '#1a0a2e',
-  text: '#ffffff',
-  textMuted: '#cccccc',
+  purple:     '#C77DFF',
+  bg:         '#0a0118',
+  cardBg:     '#1a0a2e',
+  text:       '#ffffff',
+  textMuted:  '#cccccc',
   textSubtle: '#888888',
 };
 const GRAD = 'linear-gradient(135deg, #C77DFF 0%, #FF6B9D 100%)';
 
-const FEATURES = [
-  { icon: '\uD83D\uDD0D', text: 'Advanced filtering (Want/Avoid system)' },
-  { icon: '\u26A0\uFE0F', text: 'Detailed content warnings' },
-  { icon: '\uD83D\uDCDA', text: 'Full book pages with synopsis' },
-  { icon: '\uD83D\uDC8E', text: 'Daily hidden gems discovery' },
-  { icon: '\uD83C\uDF0D', text: 'Unlock biomes & themes' },
-];
-
-export function UpgradeModal({ onClose, feature = 'Premium Features', onUpgrade }) {
-  const [hovering, setHovering] = useState(false);
-
+export function UpgradeModal({ onClose, feature = 'Pro Features', onUpgrade }) {
   return (
     <div
       style={{
@@ -43,9 +40,9 @@ export function UpgradeModal({ onClose, feature = 'Premium Features', onUpgrade 
         style={{
           background: C.cardBg,
           borderRadius: 24,
-          border: `1px solid rgba(199,125,255,0.2)`,
-          padding: '32px 24px',
-          maxWidth: 420,
+          border: '1px solid rgba(199,125,255,0.2)',
+          padding: '36px 28px',
+          maxWidth: 400,
           width: '100%',
           boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
           animation: 'slideUp 0.4s cubic-bezier(0.34,1.4,0.64,1)',
@@ -53,95 +50,41 @@ export function UpgradeModal({ onClose, feature = 'Premium Features', onUpgrade 
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ fontSize: 56, marginBottom: 16 }}>{'\uD83D\uDC51'}</div>
+        {/* Decorative bar */}
+        <div style={{
+          width: 48, height: 4, borderRadius: 2,
+          background: GRAD, margin: '0 auto 28px',
+        }} />
 
-        <h2 style={{
+        <div style={{
           fontFamily: "'Sora', sans-serif",
-          fontSize: 22,
-          fontWeight: 800,
-          color: C.text,
-          marginBottom: 8,
+          fontSize: 20, fontWeight: 800,
+          color: C.text, marginBottom: 12,
         }}>
-          Unlock {feature}
-        </h2>
+          {feature} — Coming Soon
+        </div>
 
         <p style={{
           fontFamily: "'Nunito', sans-serif",
-          fontSize: 14,
-          color: C.textSubtle,
-          marginBottom: 24,
-          lineHeight: 1.6,
+          fontSize: 14, color: C.textSubtle,
+          lineHeight: 1.7, marginBottom: 28,
         }}>
-          Upgrade to Premium for advanced filters, full book details, hidden gems, and more.
+          Pro features — advanced filters, unlimited on-demand scoring, and more —
+          are on the roadmap. StyleScope is free while we're in early access.
         </p>
-
-        <div style={{
-          background: 'rgba(199,125,255,0.06)',
-          border: '1px solid rgba(199,125,255,0.12)',
-          borderRadius: 16,
-          padding: 20,
-          marginBottom: 24,
-          textAlign: 'left',
-        }}>
-          {FEATURES.map((item, i) => (
-            <div key={i} style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              marginBottom: i < FEATURES.length - 1 ? 14 : 0,
-              fontFamily: "'Nunito', sans-serif",
-              fontSize: 14,
-              color: C.textMuted,
-            }}>
-              <span style={{ fontSize: 18, flexShrink: 0 }}>{item.icon}</span>
-              {item.text}
-            </div>
-          ))}
-        </div>
-
-        <button
-          onClick={() => {
-            if (onUpgrade) onUpgrade();
-            else window.location.href = '/pricing';
-          }}
-          onMouseEnter={() => setHovering(true)}
-          onMouseLeave={() => setHovering(false)}
-          style={{
-            width: '100%',
-            padding: 14,
-            borderRadius: 100,
-            border: 'none',
-            background: GRAD,
-            color: 'white',
-            fontFamily: "'Sora', sans-serif",
-            fontWeight: 700,
-            fontSize: 16,
-            cursor: 'pointer',
-            boxShadow: '0 8px 24px rgba(199,125,255,0.35)',
-            marginBottom: 12,
-            transform: hovering ? 'scale(1.02)' : 'scale(1)',
-            transition: 'transform 0.2s',
-          }}
-        >
-          Upgrade for $4.99/month
-        </button>
 
         <button
           onClick={onClose}
           style={{
-            width: '100%',
-            padding: 12,
-            borderRadius: 100,
-            border: 'none',
-            background: 'transparent',
-            color: C.textSubtle,
+            width: '100%', padding: '13px',
+            borderRadius: 100, border: 'none',
+            background: GRAD, color: '#fff',
             fontFamily: "'Sora', sans-serif",
-            fontWeight: 600,
-            fontSize: 14,
+            fontWeight: 700, fontSize: 15,
             cursor: 'pointer',
           }}
         >
-          Maybe later
+          Got it
         </button>
       </div>
     </div>
