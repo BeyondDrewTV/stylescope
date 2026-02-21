@@ -1,0 +1,27 @@
+export const TOKENS = {
+  dark: {
+    bgApp: '#05070B',
+    bgSurface: '#10131A',
+    bgElevated: '#171B24',
+    bgHover: '#1C2130',
+    textPrimary: '#F5F5F7',
+    textSecondary: '#A5A9B5',
+    textMuted: '#6D7280',
+    accentPrimary: '#E08BAA',
+    accentPrimarySoft: 'rgba(224,139,170,0.15)',
+    accentPrimarySofter: 'rgba(224,139,170,0.08)',
+    accentPositive: '#6AD2A0',
+    accentWarning: '#F5C56A',
+    accentDanger: '#F28C8C',
+    borderSubtle: '#262A35',
+    borderStrong: '#343946',
+  },
+  light: {
+    bgApp: '#F7F8FC',
+    bgSurface: '#FFFFFF',
+    bgElevated: '#FFFFFF',
+    textPrimary: '#11131A',
+    textSecondary: '#4B5263',
+    textMuted: '#727A8F',
+  },
+};

@@ -32,6 +32,7 @@ All routes:
 
 import csv
 import json
+import logging
 import os
 import random
 import re
@@ -39,7 +40,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import stripe
@@ -69,6 +70,7 @@ from backend.jobs import (
     update_on_demand_job_status,
 )
 
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
@@ -358,7 +360,7 @@ def _check_and_increment_usage(user_key: str) -> tuple[bool, int]:
     If allowed is False the count is NOT incremented.
     """
     from datetime import datetime
-    year_month = datetime.utcnow().strftime("%Y-%m")
+    year_month = datetime.now(timezone.utc).strftime("%Y-%m")
     conn = get_conn()
     try:
         c = conn.cursor()
@@ -392,7 +394,7 @@ def _check_and_increment_usage(user_key: str) -> tuple[bool, int]:
 def _get_usage_count(user_key: str) -> int:
     """Return how many on-demand scores the user has used this month."""
     from datetime import datetime
-    year_month = datetime.utcnow().strftime("%Y-%m")
+    year_month = datetime.now(timezone.utc).strftime("%Y-%m")
     conn = get_conn()
     try:
         row = conn.execute(
@@ -417,7 +419,7 @@ def _log_event(event: str, user_key: str | None = None,
         conn.execute(
             "INSERT INTO analytics_events (ts, event, user_key, session_id, properties) VALUES (?,?,?,?,?)",
             (
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
                 event,
                 user_key,
                 session_id,
@@ -1196,7 +1198,25 @@ def score_on_demand():
         { "error": "cap_reached", "used": int, "cap": int,
           "message": "You've used all 10 score slots this month..." }
     """
-    data = request.get_json(force=True) or {}
+    try:
+        data = request.get_json(force=True) or {}
+    except Exception as exc:
+        logger.warning("/api/score-on-demand invalid JSON payload: %s", exc)
+        return jsonify({
+            "error": "invalid_json",
+            "message": "Request body must be valid JSON.",
+        }), 400
+
+    logger.info(
+        "/api/score-on-demand payload received: %s",
+        {
+            "title": data.get("title"),
+            "author": data.get("author"),
+            "isbn": data.get("isbn"),
+            "user_id": data.get("user_id"),
+            "session_id": data.get("session_id"),
+        },
+    )
 
     title = (data.get("title") or "").strip()
     author = (data.get("author") or "").strip()
@@ -1204,8 +1224,17 @@ def score_on_demand():
     user_id = data.get("user_id")
     session_id = data.get("session_id")
 
-    if not title or not author:
-        return jsonify({"error": "title and author are required"}), 400
+    missing_fields = []
+    if not title:
+        missing_fields.append("title")
+    if not author:
+        missing_fields.append("author")
+    if missing_fields:
+        return jsonify({
+            "error": "validation_error",
+            "message": "Title and author are required.",
+            "missing_fields": missing_fields,
+        }), 400
 
     # Derive stable user key for cap tracking + analytics
     user_key = _get_user_key(user_id, request)
@@ -1229,6 +1258,31 @@ def score_on_demand():
             "book_id": existing["id"],
             "message": "This book is already in the StyleScope library.",
         }), 200
+
+    # Deduplicate accidental duplicate submits (e.g. dev StrictMode double effects)
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    conn = get_conn()
+    try:
+        active_job = conn.execute(
+            """
+            SELECT id FROM on_demand_jobs
+            WHERE lower(title)=lower(?) AND lower(author)=lower(?)
+              AND status IN ('queued','running')
+              AND created_at >= ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (title, author, cutoff_iso),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if active_job:
+        return jsonify({
+            "job_id": active_job["id"],
+            "usage": {"used": _get_usage_count(user_key), "cap": ON_DEMAND_MONTHLY_CAP},
+            "status": "already_processing",
+        }), 202
 
     # Enforce monthly soft cap
     allowed, new_count = _check_and_increment_usage(user_key)
@@ -1298,6 +1352,17 @@ def get_score_on_demand(job_id: str):
         except Exception:
             resp["result"] = None
             resp["error_message"] = "Failed to parse result JSON"
+
+        result_obj = resp.get("result") or {}
+        book_id = result_obj.get("book_id") if isinstance(result_obj, dict) else None
+        if book_id:
+            conn = get_conn()
+            try:
+                row = conn.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
+                if row:
+                    resp["book"] = _deserialize_book(dict(row))
+            finally:
+                conn.close()
     elif status == "failed":
         resp["error_message"] = job["error_message"]
 
@@ -1804,40 +1869,6 @@ def get_home_sections():
         "highestRated": highest_rated,
         "randomPicks": random_picks,
     })
-
-
-# ---------------------------------------------------------------------------
-# Hidden gems
-# ---------------------------------------------------------------------------
-
-@app.route("/api/hidden-gems/daily", methods=["GET"])
-def get_daily_hidden_gems():
-    """
-    Return 9 under-discovered high-quality books.
-    Algorithm: qualityScore >= 75 AND readers < 1000
-    Rotates daily based on date seed.
-    """
-    conn = get_conn()
-    c = conn.cursor()
-
-    c.execute("""
-        SELECT * FROM books
-        WHERE qualityScore >= 75 AND (readers IS NULL OR readers < 1000)
-        ORDER BY qualityScore DESC
-        LIMIT 50
-    """)
-    eligible = [_deserialize_book(dict(row)) for row in c.fetchall()]
-    conn.close()
-
-    if len(eligible) < 9:
-        # Not enough qualifying books — return what we have
-        gems = eligible
-    else:
-        today = datetime.now().strftime("%Y-%m-%d")
-        random.seed(today)
-        gems = random.sample(eligible, 9)
-
-    return jsonify({"gems": gems, "date": datetime.now().strftime("%Y-%m-%d")})
 
 
 # ---------------------------------------------------------------------------
