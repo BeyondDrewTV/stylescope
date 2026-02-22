@@ -35,6 +35,48 @@ const T = {
   borderAccent: 'rgba(224,139,170,0.2)',
 };
 
+// ─── Text Normalization ───────────────────────────────────────────────────────
+// Normalize title to title case: "the wicked king" → "The Wicked King"
+function normalizeTitle(title) {
+  if (!title) return '';
+  const trimmed = title.trim();
+
+  // Words that should stay lowercase in title case (unless they're the first word)
+  const lowercaseWords = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'from', 'by', 'of', 'in']);
+
+  return trimmed
+    .split(' ')
+    .map((word, index) => {
+      if (!word) return '';
+      // Always capitalize first word, otherwise check if it should stay lowercase
+      if (index === 0 || !lowercaseWords.has(word.toLowerCase())) {
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+      }
+      return word.toLowerCase();
+    })
+    .join(' ');
+}
+
+// Normalize author to proper name capitalization: "holly black" → "Holly Black"
+function normalizeAuthor(author) {
+  if (!author) return '';
+  const trimmed = author.trim();
+
+  return trimmed
+    .split(' ')
+    .map(word => {
+      if (!word) return '';
+      // Handle names with apostrophes (e.g., "O'Brien")
+      if (word.includes("'")) {
+        return word.split("'").map(part =>
+          part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()
+        ).join("'");
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
 // Legacy alias kept for compatibility
 const C = {
   purple:     T.accent,
@@ -557,9 +599,9 @@ function BookCard({ book, onSelect, onRequest, index }) {
             lineHeight: 1.35, marginBottom: 3,
             overflow: 'hidden', display: '-webkit-box',
             WebkitLineClamp: 1, WebkitBoxOrient: 'vertical',
-          }}>{book.title}</h3>
+          }}>{normalizeTitle(book.title)}</h3>
           <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 7, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {book.author}
+            {normalizeAuthor(book.author)}
           </p>
           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
             {book.spiceLevel != null && (
@@ -1018,8 +1060,8 @@ function BookModal({ book, onClose, onRequest, onCwExpanded, onSectionViewed }) 
                 fontSize: 20, fontWeight: 400, lineHeight: 1.25,
                 color: T.textPrimary, marginBottom: 5,
                 letterSpacing: '-0.01em',
-              }}>{book.title}</h2>
-              <p style={{ fontSize: 14, color: T.textSecondary, marginBottom: 6 }}>{book.author}</p>
+              }}>{normalizeTitle(book.title)}</h2>
+              <p style={{ fontSize: 14, color: T.textSecondary, marginBottom: 6 }}>{normalizeAuthor(book.author)}</p>
               {book.series && (
                 <p style={{ fontSize: 12, color: T.textMuted }}>
                   {book.series}{book.seriesNumber ? ` · Book ${book.seriesNumber}` : ''}
@@ -1334,10 +1376,19 @@ function ScoringOverlay({ book, onClose, onScored, sessionId }) {
     async function start() {
       let jobId = null;
       try {
+        // Normalize title and author before sending to API
+        const normalizedTitle = normalizeTitle(book.title);
+        const normalizedAuthor = normalizeAuthor(book.author);
+
         const res = await fetch('/api/score-on-demand', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: book.title, author: book.author, isbn: book.isbn || undefined, session_id: sessionId }),
+          body: JSON.stringify({
+            title: normalizedTitle,
+            author: normalizedAuthor,
+            isbn: book.isbn || undefined,
+            session_id: sessionId
+          }),
         });
         const data = await res.json();
 
@@ -1376,6 +1427,18 @@ function ScoringOverlay({ book, onClose, onScored, sessionId }) {
             setPhase('done');
             onScored && onScored(data.result);
             api.logEvent('on_demand_result_viewed', { sessionId, properties: { overall_score: data.result?.overall_score } });
+
+            // Open BookModal after a brief delay to show the score
+            setTimeout(() => {
+              const bookId = data.result?.book_id;
+              if (bookId) {
+                onClose();
+                // Trigger the parent to open BookModal with the newly scored book
+                if (onScored) {
+                  onScored({ ...data.result, book_id: bookId, shouldOpenModal: true });
+                }
+              }
+            }, 1500); // 1.5s delay to let user see the score
           } else if (data.status === 'failed') {
             clearInterval(pollRef.current);
             const msg = data.error_message || 'Scoring failed.';
@@ -1512,7 +1575,8 @@ function ScoringOverlay({ book, onClose, onScored, sessionId }) {
     );
   }
 
-  // Done
+  // Done - This phase is now just for showing the score briefly before opening BookModal
+  // The actual modal opening happens automatically via useEffect
   if (phase === 'done') {
     const alreadyScored = result?.already_scored;
     const score         = result?.overall_score;
@@ -1539,12 +1603,16 @@ function ScoringOverlay({ book, onClose, onScored, sessionId }) {
         )}
 
         <p style={{ fontSize: 13, color: T.textMuted, marginBottom: 28, lineHeight: 1.55 }}>
-          {alreadyScored
-            ? 'This book is already in our library. Search for it to see the full breakdown.'
-            : 'Saved to StyleScope. Search for this book anytime to see the full scorecard.'}
+          Opening full scorecard...
         </p>
 
-        <button className="btn-primary" onClick={onClose}>Done</button>
+        <div style={{
+          width: 24, height: 24, margin: '0 auto',
+          borderRadius: '50%',
+          border: `2px solid ${T.borderStrong}`,
+          borderTopColor: T.accent,
+          animation: 'spin 0.85s linear infinite',
+        }}/>
       </div>
     );
   }
@@ -1651,7 +1719,21 @@ export default function App() {
             book={scoringBook}
             sessionId={sessionId}
             onClose={() => setScoringBook(null)}
-            onScored={() => setScoringBook(null)}
+            onScored={(result) => {
+              setScoringBook(null);
+              // If the scoring completed with a book_id and shouldOpenModal flag, open the BookModal
+              if (result?.shouldOpenModal && result?.book_id) {
+                // Fetch the full book data and open the modal
+                fetch(`/api/books/${result.book_id}`)
+                  .then(r => r.json())
+                  .then(book => {
+                    if (book && !book.error) {
+                      setSelectedBook(book);
+                    }
+                  })
+                  .catch(err => console.error('Failed to fetch book:', err));
+              }
+            }}
           />
         )}
 
